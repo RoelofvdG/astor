@@ -1,5 +1,7 @@
 package fr.inria.astor.core.solutionsearch.spaces.ingredients.scopes;
 
+import java.io.BufferedWriter;
+import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -56,7 +58,13 @@ public class ExpressionTypeIngredientSpace
 	}
 
 	@Override
-	public void defineSpace(ProgramVariant variant) {
+	public void defineSpace(ProgramVariant variant) throws IOException {
+
+		File file = new File("templates.txt");
+		FileWriter fw = new FileWriter(file, true);
+		BufferedWriter bw = new BufferedWriter(fw);
+
+
 
 		List<CtType<?>> affected = obtainClassesFromScope(variant);
 		log.debug("Creating Expression Ingredient space: ");
@@ -86,6 +94,12 @@ public class ExpressionTypeIngredientSpace
 
 						Ingredient templateIngredient = new Ingredient(templateElement);
 
+						String returnTypeExpression = (ctExpr.getType() != null) ? ctExpr.getType().getSimpleName() : "null";
+						String templateData = templateIngredient.toString() + " -> " + getType(templateIngredient) + " -> " + returnTypeExpression;
+						System.out.println(templateData);
+
+						bw.write(templateData + "\n");
+
 						if (ConfigurationProperties.getPropertyBool("duplicateingredientsinspace")
 								|| !ingredientsKey.contains(templateIngredient)) {
 							ingredientsKey.add(templateIngredient);
@@ -110,6 +124,10 @@ public class ExpressionTypeIngredientSpace
 				}
 			}
 		}
+
+		bw.close();
+		fw.close();
+
 		int nrIng = 0;
 		// Printing summary:
 		for (Object ingList : mkp.values()) {

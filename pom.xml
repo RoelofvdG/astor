@@ -175,7 +175,7 @@
 		<repository>
 			<id>sachaproject.gforge.inria.fr-release</id>
 			<name>Maven Repository for Spoon Release</name>
-			<url>https://files.inria.fr/sachaproject/htdocs/repositories/releases/</url>
+			<url>https://sachaproject.gforge.inria.fr/repositories/releases/</url>
 			<snapshots />
 		</repository>
 
@@ -280,23 +280,6 @@
 				<artifactId>maven-deploy-plugin</artifactId>
 				<version>2.8.1</version>
 			</plugin>
-			<!-- Fix missing dependencies in maven-site-plugin -->
-			<plugin>
-				<artifactId>maven-site-plugin</artifactId>
-				<version>3.10.0</version>
-				<dependencies>
-					<dependency>
-						<groupId>org.apache.maven.doxia</groupId>
-						<artifactId>doxia-module-markdown</artifactId>
-						<version>1.11.1</version>
-					</dependency>
-					<dependency>
-						<groupId>org.apache.maven.doxia</groupId>
-						<artifactId>doxia-site-renderer</artifactId>
-						<version>1.11.1</version>
-					</dependency>
-				</dependencies>
-			</plugin>
 			<plugin>
 				<groupId>com.github.github</groupId>
 				<artifactId>site-maven-plugin</artifactId>
@@ -313,16 +296,7 @@
 					</includes>
 					<repositoryName>maven-repository</repositoryName>
 					<repositoryOwner>tdurieux</repositoryOwner>
-					<serverId>tdurieux.github.io</serverId>
 				</configuration>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>site</goal>
-                        </goals>
-                        <phase>deploy</phase>
-                    </execution>
-                </executions>
 			</plugin>
 
 			<plugin>
@@ -459,11 +433,15 @@
 
 
 	<distributionManagement>
+
 		<repository>
-		<!-- deploy with mvn clean deploy -DskipTests -->
-			<id>internal-repo</id>
-			<name>Temporary Staging Repository</name>
-			<url>file://${project.build.directory}/mvn-repo/snapshots</url>
+			<id>ossrh</id>
+			<url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
 		</repository>
+		<snapshotRepository>
+			<id>ossrh-snapshot</id>
+			<url>https://oss.sonatype.org/repositories/snapshots</url>
+		</snapshotRepository>
+
 	</distributionManagement>
 </project>

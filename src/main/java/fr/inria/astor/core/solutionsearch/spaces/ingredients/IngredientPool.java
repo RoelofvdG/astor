@@ -1,5 +1,6 @@
 package fr.inria.astor.core.solutionsearch.spaces.ingredients;
 
+import java.io.IOException;
 import java.util.List;
 
 import fr.inria.astor.core.entities.ProgramVariant;
@@ -30,7 +31,7 @@ public interface IngredientPool<Q extends Object, K extends Object, I extends Ob
 	 * @param all
 	 *            corresponds to all types from the program under analysis.
 	 */
-	public void defineSpace(ProgramVariant variant);
+	public void defineSpace(ProgramVariant variant) throws IOException;
 
 	/**
 	 * Returns the list of ingredients from location
