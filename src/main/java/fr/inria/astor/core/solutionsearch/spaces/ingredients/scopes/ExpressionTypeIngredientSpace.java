@@ -34,6 +34,7 @@ import spoon.reflect.code.CtVariableAccess;
 import spoon.reflect.declaration.CtElement;
 import spoon.reflect.declaration.CtPackage;
 import spoon.reflect.declaration.CtType;
+import spoon.reflect.visitor.filter.TypeFilter;
 
 /**
  * 
@@ -61,7 +62,7 @@ public class ExpressionTypeIngredientSpace
 	public void defineSpace(ProgramVariant variant) throws IOException {
 
 		File file = new File("templates.txt");
-		FileWriter fw = new FileWriter(file, true);
+		FileWriter fw = new FileWriter(file, false);
 		BufferedWriter bw = new BufferedWriter(fw);
 
 
@@ -92,13 +93,16 @@ public class ExpressionTypeIngredientSpace
 						CtCodeElement templateElement = MutationSupporter.clone(ctExpr);
 						formatIngredient(templateElement);
 
+						templateElement.getElements(new TypeFilter<>(CtElement.class))
+								.forEach(e -> e.setComments(new ArrayList<>()));
+
 						Ingredient templateIngredient = new Ingredient(templateElement);
 
 						String returnTypeExpression = (ctExpr.getType() != null) ? ctExpr.getType().getSimpleName() : "null";
 						String templateData = templateIngredient.toString() + " -> " + getType(templateIngredient) + " -> " + returnTypeExpression;
 						System.out.println(templateData);
 
-						bw.write(templateData + "\n");
+						bw.write(templateData + "\n###\n");
 
 						if (ConfigurationProperties.getPropertyBool("duplicateingredientsinspace")
 								|| !ingredientsKey.contains(templateIngredient)) {

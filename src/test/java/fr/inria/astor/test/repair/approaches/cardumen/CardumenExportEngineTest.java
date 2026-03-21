@@ -117,9 +117,19 @@ public class CardumenExportEngineTest extends BaseEvolutionaryTest {
 
 		// ExpressionTypeIngredientSpace writes entries in the format:
 		//   templateCode -> SpoonASTClass -> returnType
-		// Template code may span multiple lines, so check the whole file contains
-		// the separator at least once rather than asserting per-line.
+		//   ###
+		// Each entry is terminated by "###" on its own line, allowing
+		// multi-line template code. Split on "###" and assert each entry
+		// contains exactly two " -> " separators.
 		String content = String.join("\n", lines);
-		assertTrue("templates.txt should contain ' -> ' separators", content.contains(" -> "));
+		String[] entries = content.split("###");
+		for (String entry : entries) {
+			if (entry.trim().isEmpty()) continue;
+			int first = entry.indexOf(" -> ");
+			int second = entry.indexOf(" -> ", first + 1);
+			assertTrue("each entry should contain at least two ' -> ' separators: " + entry, second >= 0);
+			assertTrue("each entry should contain exactly two ' -> ' separators: " + entry,
+					entry.indexOf(" -> ", second + 1) < 0);
+		}
 	}
 }
