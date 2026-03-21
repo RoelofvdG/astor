@@ -99,7 +99,7 @@ public class ExpressionTypeIngredientSpace
 						Ingredient templateIngredient = new Ingredient(templateElement);
 
 						String returnTypeExpression = (ctExpr.getType() != null) ? ctExpr.getType().getSimpleName() : "null";
-						String templateData = templateIngredient.toString() + " -> " + getType(templateIngredient) + " -> " + returnTypeExpression;
+						String templateData = templateIngredient + " -> " + getType(templateIngredient) + " -> " + returnTypeExpression;
 						System.out.println(templateData);
 
 						bw.write(templateData + "\n###\n");
