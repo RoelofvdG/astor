@@ -27,7 +27,10 @@ import fr.inria.astor.core.manipulation.sourcecode.VariableResolver;
 import fr.inria.astor.core.setup.ConfigurationProperties;
 import fr.inria.astor.core.solutionsearch.spaces.ingredients.IngredientPoolLocationType;
 import fr.inria.astor.util.MapList;
+import spoon.reflect.code.BinaryOperatorKind;
+import spoon.reflect.code.CtBinaryOperator;
 import spoon.reflect.code.CtCodeElement;
+import spoon.reflect.code.CtTypeAccess;
 import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtFieldAccess;
 import spoon.reflect.code.CtVariableAccess;
@@ -61,6 +64,7 @@ public class ExpressionTypeIngredientSpace
 	@Override
 	public void defineSpace(ProgramVariant variant) throws IOException {
 
+		// Make file for outputting templates
 		File file = new File("templates.txt");
 		FileWriter fw = new FileWriter(file, false);
 		BufferedWriter bw = new BufferedWriter(fw);
@@ -98,11 +102,32 @@ public class ExpressionTypeIngredientSpace
 
 						Ingredient templateIngredient = new Ingredient(templateElement);
 
+						// Get information about the template for writing to file.
 						String returnTypeExpression = (ctExpr.getType() != null) ? ctExpr.getType().getSimpleName() : "null";
 						String templateData = templateIngredient + " -> " + getType(templateIngredient) + " -> " + returnTypeExpression;
 						System.out.println(templateData);
 
 						bw.write(templateData + "\n###\n");
+
+						// If the template is a binary operator (&&, ==, etc.)
+						// Create an additional template of the root operator.
+						if (ctExpr instanceof CtBinaryOperator) {
+							CtBinaryOperator binOp = (CtBinaryOperator) ctExpr;
+							CtExpression<?> left = binOp.getLeftHandOperand();
+							CtExpression<?> right = binOp.getRightHandOperand();
+							if (left.getType() != null && right.getType() != null) {
+								String operator = getBinaryOperatorSymbol(binOp.getKind());
+								String rightTypeName = (right instanceof CtTypeAccess)
+										? ((CtTypeAccess<?>) right).getAccessedType().getSimpleName()
+										: right.getType().getSimpleName();
+								String rootTemplate = left.getType().getSimpleName()
+										+ " " + operator + " "
+										+ rightTypeName
+										+ " -> CtBinaryOperatorImpl -> "
+										+ returnTypeExpression;
+								bw.write(rootTemplate + "\n###\n");
+							}
+						}
 
 						if (ConfigurationProperties.getPropertyBool("duplicateingredientsinspace")
 								|| !ingredientsKey.contains(templateIngredient)) {
@@ -262,6 +287,32 @@ public class ExpressionTypeIngredientSpace
 	}
 
 	@SuppressWarnings("unchecked")
+	private String getBinaryOperatorSymbol(BinaryOperatorKind kind) {
+		switch (kind) {
+			case OR:       return "||";
+			case AND:      return "&&";
+			case BITOR:    return "|";
+			case BITXOR:   return "^";
+			case BITAND:   return "&";
+			case EQ:       return "==";
+			case NE:       return "!=";
+			case LT:       return "<";
+			case GT:       return ">";
+			case LE:       return "<=";
+			case GE:       return ">=";
+			case SL:       return "<<";
+			case SR:       return ">>";
+			case USR:      return ">>>";
+			case PLUS:     return "+";
+			case MINUS:    return "-";
+			case MUL:      return "*";
+			case DIV:      return "/";
+			case MOD:      return "%";
+			case INSTANCEOF: return "instanceof";
+			default:       return kind.name();
+		}
+	}
+
 	public void formatIngredient(CtElement ingredientCtElement) {
 
 		// log.debug("\n------" + ingredientCtElement);
