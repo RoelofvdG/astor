@@ -8,8 +8,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.commons.collections.keyvalue.MultiKey;
 import org.apache.commons.collections.map.MultiKeyMap;
@@ -37,6 +41,7 @@ import spoon.reflect.code.CtVariableAccess;
 import spoon.reflect.declaration.CtElement;
 import spoon.reflect.declaration.CtPackage;
 import spoon.reflect.declaration.CtType;
+import spoon.reflect.reference.CtTypeReference;
 import spoon.reflect.visitor.filter.TypeFilter;
 
 /**
@@ -54,6 +59,8 @@ public class ExpressionTypeIngredientSpace
 	public List<Ingredient> allElementsFromSpace = new ArrayList<>();
 
 	public MapList<String, Ingredient> linkTemplateElements = new MapList<>();
+
+	public Set<CtTypeReference<?>> collectedTypes = new LinkedHashSet<>();
 
 	protected Logger log = Logger.getLogger(this.getClass().getName());
 
@@ -111,22 +118,20 @@ public class ExpressionTypeIngredientSpace
 
 						// If the template is a binary operator (&&, ==, etc.)
 						// Create an additional template of the root operator.
-						if (ctExpr instanceof CtBinaryOperator) {
-							CtBinaryOperator binOp = (CtBinaryOperator) ctExpr;
-							CtExpression<?> left = binOp.getLeftHandOperand();
-							CtExpression<?> right = binOp.getRightHandOperand();
-							if (left.getType() != null && right.getType() != null) {
-								String operator = getBinaryOperatorSymbol(binOp.getKind());
-								String rightTypeName = (right instanceof CtTypeAccess)
-										? ((CtTypeAccess<?>) right).getAccessedType().getSimpleName()
-										: right.getType().getSimpleName();
-								String rootTemplate = left.getType().getSimpleName()
-										+ " " + operator + " "
-										+ rightTypeName
-										+ " -> CtBinaryOperatorImpl -> "
-										+ returnTypeExpression;
-								bw.write(rootTemplate + "\n###\n");
-							}
+						if (templateElement instanceof CtBinaryOperator) {
+							CtBinaryOperator<?> templateBinOp = (CtBinaryOperator<?>) templateElement;
+							CtExpression<?> templateLeft = templateBinOp.getLeftHandOperand();
+							CtExpression<?> templateRight = templateBinOp.getRightHandOperand();
+							String operator = getBinaryOperatorSymbol(templateBinOp.getKind());
+							String rightTypeName = (templateRight instanceof CtTypeAccess)
+									? ((CtTypeAccess<?>) templateRight).getAccessedType().getSimpleName()
+									: templateRight.toString();
+							String rootTemplate = templateLeft.toString()
+									+ " " + operator + " "
+									+ rightTypeName
+									+ " -> CtBinaryOperatorImpl -> "
+									+ returnTypeExpression;
+							bw.write(rootTemplate + "\n###\n");
 						}
 
 						if (ConfigurationProperties.getPropertyBool("duplicateingredientsinspace")
@@ -156,6 +161,8 @@ public class ExpressionTypeIngredientSpace
 
 		bw.close();
 		fw.close();
+
+		writeTypeHierarchy();
 
 		int nrIng = 0;
 		// Printing summary:
@@ -329,6 +336,7 @@ public class ExpressionTypeIngredientSpace
 			String abstractName = "";
 			if (!varMappings.containsKey(var.getVariable().getSimpleName())) {
 				String currentTypeName = var.getVariable().getType().getSimpleName();
+				collectedTypes.add(var.getVariable().getType());
 				if (currentTypeName.contains("?")) {
 					// Any change in case of ?
 					abstractName = var.getVariable().getSimpleName();
@@ -351,6 +359,43 @@ public class ExpressionTypeIngredientSpace
 
 		}
 
+	}
+
+	private void writeTypeHierarchy() throws IOException {
+		File file = new File("type_hierarchy.txt");
+		FileWriter fw = new FileWriter(file, false);
+		BufferedWriter bw = new BufferedWriter(fw);
+
+		Set<String> visited = new LinkedHashSet<>();
+		Deque<CtTypeReference<?>> worklist = new ArrayDeque<>(collectedTypes);
+
+		while (!worklist.isEmpty()) {
+			CtTypeReference<?> typeRef = worklist.poll();
+			if (!visited.add(typeRef.getQualifiedName())) continue;
+
+			CtType<?> typeDecl = null;
+			try {
+				typeDecl = typeRef.getTypeDeclaration();
+			} catch (Exception e) {
+				// unresolvable in noClasspath mode — skip
+			}
+			if (typeDecl == null) continue;
+
+			String simpleName = typeRef.getSimpleName();
+			CtTypeReference<?> superclass = typeDecl.getSuperclass();
+			if (superclass != null) {
+				bw.write(simpleName + " -> extends -> " + superclass.getQualifiedName() + "\n");
+				worklist.add(superclass);
+			}
+			for (CtTypeReference<?> iface : typeDecl.getSuperInterfaces()) {
+				bw.write(simpleName + " -> implements -> " + iface.getQualifiedName() + "\n");
+				worklist.add(iface);
+			}
+		}
+
+		bw.close();
+		fw.close();
+		log.info("ExpressionTypeIngredientSpace: type hierarchy written to type_hierarchy.txt");
 	}
 
 	protected List<Ingredient> getIngrediedientsFromKey(String keyLocation, CtExpression ctExpr) {

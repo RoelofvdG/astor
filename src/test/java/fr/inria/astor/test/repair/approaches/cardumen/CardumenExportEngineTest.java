@@ -58,17 +58,19 @@ public class CardumenExportEngineTest extends BaseEvolutionaryTest {
 		CardumenExportEngine engine = (CardumenExportEngine) main.getEngine();
 		assertEquals(AstorOutputStatus.EXHAUSTIVE_NAVIGATED, engine.getOutputStatus());
 
-		File templates = new File("templates.txt");
-		File context  = new File("context.txt");
-		File target   = new File("target_type.txt");
+		File templates  = new File("templates.txt");
+		File context    = new File("context.txt");
+		File target     = new File("target_type.txt");
+		File hierarchy  = new File("type_hierarchy.txt");
 
-		assertTrue("templates.txt should exist",   templates.exists());
-		assertTrue("context.txt should exist",     context.exists());
-		assertTrue("target_type.txt should exist", target.exists());
+		assertTrue("templates.txt should exist",        templates.exists());
+		assertTrue("context.txt should exist",          context.exists());
+		assertTrue("target_type.txt should exist",      target.exists());
+		assertTrue("type_hierarchy.txt should exist",   hierarchy.exists());
 
-		assertTrue("templates.txt should be non-empty", templates.length() > 0);
-		assertTrue("context.txt should be non-empty",   context.length()  > 0);
-		assertTrue("target_type.txt should be non-empty", target.length() > 0);
+		assertTrue("templates.txt should be non-empty",   templates.length() > 0);
+		assertTrue("context.txt should be non-empty",     context.length()   > 0);
+		assertTrue("target_type.txt should be non-empty", target.length()    > 0);
 	}
 
 	@Test
@@ -104,6 +106,22 @@ public class CardumenExportEngineTest extends BaseEvolutionaryTest {
 				content.contains("# Methods of enclosing class"));
 		assertTrue("should have reachable methods section",
 				content.contains("# Methods reachable via in-scope variables"));
+	}
+
+	@Test
+	public void testTypeHierarchyFileFormat() throws Exception {
+		AstorMain main = new AstorMain();
+		main.execute(chart11Command().flat());
+
+		List<String> lines = Files.readAllLines(new File("type_hierarchy.txt").toPath());
+		for (String line : lines) {
+			if (line.trim().isEmpty()) continue;
+			// Each line must be: SimpleName -> (extends|implements) -> qualified.Name
+			String[] parts = line.split(" -> ");
+			assertEquals("each line should have exactly 3 parts: " + line, 3, parts.length);
+			assertTrue("middle part must be 'extends' or 'implements': " + line,
+					parts[1].equals("extends") || parts[1].equals("implements"));
+		}
 	}
 
 	@Test

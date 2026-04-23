@@ -25,9 +25,10 @@ import spoon.reflect.reference.CtTypeReference;
  * and suspicious-location type information to files for use by external tools.
  * <p>
  * Outputs (relative to the working directory):
- *   templates.txt   - written by the ingredient space during setup (one template per line)
- *   context.txt     - in-scope variables and methods at the top-ranked modification point
- *   target_type.txt - location and expression type of the top-ranked modification point
+ *   templates.txt      - written by the ingredient space during setup (one template per line)
+ *   context.txt        - in-scope variables and methods at the top-ranked modification point
+ *   target_type.txt    - location and expression type of the top-ranked modification point
+ *   type_hierarchy.txt - superclass and interface relations for types appearing in templates
  * <p>
  * Invoke via:
  *   -mode custom -customengine fr.inria.astor.approaches.cardumen.CardumenExportEngine
