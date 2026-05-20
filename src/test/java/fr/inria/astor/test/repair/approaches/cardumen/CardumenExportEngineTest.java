@@ -106,6 +106,8 @@ public class CardumenExportEngineTest extends BaseEvolutionaryTest {
 				content.contains("# Methods of enclosing class"));
 		assertTrue("should have reachable methods section",
 				content.contains("# Methods reachable via in-scope variables"));
+		assertTrue("should have fields section",
+				content.contains("# Fields of in-scope variables"));
 	}
 
 	@Test
@@ -134,20 +136,22 @@ public class CardumenExportEngineTest extends BaseEvolutionaryTest {
         assertFalse("templates.txt should have at least one entry", lines.isEmpty());
 
 		// ExpressionTypeIngredientSpace writes entries in the format:
-		//   templateCode -> SpoonASTClass -> returnType
+		//   templateCode -> SpoonASTClass -> returnType -> qualifiedClassName -> packageName
 		//   ###
 		// Each entry is terminated by "###" on its own line, allowing
 		// multi-line template code. Split on "###" and assert each entry
-		// contains exactly two " -> " separators.
+		// contains exactly four " -> " separators.
 		String content = String.join("\n", lines);
 		String[] entries = content.split("###");
 		for (String entry : entries) {
 			if (entry.trim().isEmpty()) continue;
-			int first = entry.indexOf(" -> ");
-			int second = entry.indexOf(" -> ", first + 1);
-			assertTrue("each entry should contain at least two ' -> ' separators: " + entry, second >= 0);
-			assertTrue("each entry should contain exactly two ' -> ' separators: " + entry,
-					entry.indexOf(" -> ", second + 1) < 0);
+			int sep1 = entry.indexOf(" -> ");
+			int sep2 = entry.indexOf(" -> ", sep1 + 1);
+			int sep3 = entry.indexOf(" -> ", sep2 + 1);
+			int sep4 = entry.indexOf(" -> ", sep3 + 1);
+			assertTrue("each entry should contain at least four ' -> ' separators: " + entry, sep4 >= 0);
+			assertTrue("each entry should contain exactly four ' -> ' separators: " + entry,
+					entry.indexOf(" -> ", sep4 + 1) < 0);
 		}
 	}
 }

@@ -10,14 +10,18 @@ import java.util.stream.Collectors;
 import com.martiansoftware.jsap.JSAPException;
 
 import fr.inria.astor.core.entities.ModificationPoint;
+import fr.inria.astor.core.entities.OperatorInstance;
+import fr.inria.astor.core.entities.ProgramVariant;
 import fr.inria.astor.core.entities.SuspiciousModificationPoint;
 import fr.inria.astor.core.manipulation.MutationSupporter;
 import fr.inria.astor.core.setup.ProjectRepairFacade;
 import fr.inria.main.AstorOutputStatus;
 import spoon.reflect.code.CtExpression;
+import spoon.reflect.declaration.CtField;
 import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.declaration.CtType;
 import spoon.reflect.declaration.CtVariable;
+import spoon.reflect.reference.CtArrayTypeReference;
 import spoon.reflect.reference.CtTypeReference;
 
 /**
@@ -34,6 +38,8 @@ import spoon.reflect.reference.CtTypeReference;
  *   -mode custom -customengine fr.inria.astor.approaches.cardumen.CardumenExportEngine
  */
 public class CardumenExportEngine extends CardumenApproach {
+
+    private static final String CANDIDATE_EXPRESSION = "0";
 
     public CardumenExportEngine(MutationSupporter mutatorExecutor, ProjectRepairFacade projFacade)
             throws JSAPException {
@@ -59,9 +65,12 @@ public class CardumenExportEngine extends CardumenApproach {
 
         exportContext(target, "context.txt");
         exportTargetType(target, "target_type.txt");
+        applyAndTestCandidate(target, CANDIDATE_EXPRESSION);
 
         log.info("CardumenExportEngine: export complete");
-        this.outputStatus = AstorOutputStatus.EXHAUSTIVE_NAVIGATED;
+        if (this.outputStatus == null) {
+            this.outputStatus = AstorOutputStatus.EXHAUSTIVE_NAVIGATED;
+        }
     }
 
     /**
@@ -118,8 +127,68 @@ public class CardumenExportEngine extends CardumenApproach {
                     }
                 }
             }
+
+            // --- Fields of in-scope variables ---
+            bw.write("\n# Fields of in-scope variables\n");
+            if (vars != null) {
+                for (CtVariable<?> var : vars) {
+                    CtTypeReference<?> typeRef = var.getType();
+                    if (typeRef == null) {
+                        continue;
+                    }
+                    if (typeRef instanceof CtArrayTypeReference) {
+                        bw.write(var.getSimpleName() + ".length : int\n");
+                    } else {
+                        CtType<?> typeDecl = typeRef.getTypeDeclaration();
+                        if (typeDecl == null) {
+                            continue;
+                        }
+                        for (CtField<?> field : typeDecl.getFields()) {
+                            String fieldType = field.getType() != null
+                                    ? field.getType().getQualifiedName()
+                                    : "unknown";
+                            bw.write(var.getSimpleName() + "." + field.getSimpleName() + " : " + fieldType + "\n");
+                        }
+                    }
+                }
+            }
         }
         log.info("CardumenExportEngine: context written to " + filename);
+    }
+
+    private void applyAndTestCandidate(ModificationPoint mp, String candidateExpr) throws Exception {
+        if (!(mp.getCodeElement() instanceof CtExpression)) {
+            log.info("CardumenExportEngine: modification point is not an expression, skipping candidate test");
+            return;
+        }
+
+        CtExpression<?> candidate =
+                MutationSupporter.getFactory().Code().createCodeSnippetExpression(candidateExpr);
+
+        ExpressionReplaceOperator op = new ExpressionReplaceOperator();
+        OperatorInstance opInstance = new OperatorInstance(mp, op, mp.getCodeElement(), candidate);
+
+        ProgramVariant variant = this.variants.get(0);
+
+        boolean applied = op.applyChangesInModel(opInstance, variant);
+        if (!applied) {
+            log.error("CardumenExportEngine: failed to apply candidate \"" + candidateExpr + "\"");
+            return;
+        }
+
+        log.info("CardumenExportEngine: testing candidate expression \"" + candidateExpr + "\"");
+
+        try {
+            boolean passes = processCreatedVariant(variant, 1);
+            if (passes) {
+                log.info("CardumenExportEngine: candidate PASSES tests — patch accepted");
+                this.outputStatus = AstorOutputStatus.STOP_BY_PATCH_FOUND;
+            } else {
+                log.info("CardumenExportEngine: candidate FAILS tests");
+            }
+        } finally {
+            op.undoChangesInModel(opInstance, variant);
+        }
     }
 
     private String formatMethod(CtMethod<?> method) {

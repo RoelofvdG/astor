@@ -84,6 +84,9 @@ public class ExpressionTypeIngredientSpace
 
 			List<CtCodeElement> ingredients = this.ingredientProcessor.createFixSpace(classToProcess);
 			TargetElementProcessor.mustClone = true;
+			String qualifiedClassName = classToProcess.getQualifiedName();
+			CtPackage ctPackage = classToProcess.getParent(CtPackage.class);
+			String packageName = (ctPackage != null) ? ctPackage.getQualifiedName() : "";
 
 			for (CtCodeElement originalIngredient : ingredients) {
 				Ingredient ingredientOriginal = new Ingredient(originalIngredient);
@@ -111,7 +114,8 @@ public class ExpressionTypeIngredientSpace
 
 						// Get information about the template for writing to file.
 						String returnTypeExpression = (ctExpr.getType() != null) ? ctExpr.getType().getSimpleName() : "null";
-						String templateData = templateIngredient + " -> " + getType(templateIngredient) + " -> " + returnTypeExpression;
+						String templateData = templateIngredient + " -> " + getType(templateIngredient) + " -> " + returnTypeExpression
+								+ " -> " + qualifiedClassName + " -> " + packageName;
 						System.out.println(templateData);
 
 						bw.write(templateData + "\n###\n");
@@ -130,7 +134,8 @@ public class ExpressionTypeIngredientSpace
 									+ " " + operator + " "
 									+ rightTypeName
 									+ " -> CtBinaryOperatorImpl -> "
-									+ returnTypeExpression;
+									+ returnTypeExpression
+									+ " -> " + qualifiedClassName + " -> " + packageName;
 							bw.write(rootTemplate + "\n###\n");
 						}
 
