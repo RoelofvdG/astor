@@ -156,11 +156,12 @@ public class CardumenExportEngineTest extends BaseEvolutionaryTest {
         assertFalse("templates.txt should have at least one entry", lines.isEmpty());
 
 		// ExpressionTypeIngredientSpace writes entries in the format:
-		//   templateCode -> SpoonASTClass -> returnType -> qualifiedClassName -> packageName
+		//   templateCode -> SpoonASTClass -> returnType -> qualifiedClassName -> packageName -> count
 		//   ###
 		// Each entry is terminated by "###" on its own line, allowing
 		// multi-line template code. Split on "###" and assert each entry
-		// contains exactly four " -> " separators.
+		// contains exactly five " -> " separators and that the trailing
+		// field parses as a positive integer (the template's frequency).
 		String content = String.join("\n", lines);
 		String[] entries = content.split("###");
 		for (String entry : entries) {
@@ -169,9 +170,20 @@ public class CardumenExportEngineTest extends BaseEvolutionaryTest {
 			int sep2 = entry.indexOf(" -> ", sep1 + 1);
 			int sep3 = entry.indexOf(" -> ", sep2 + 1);
 			int sep4 = entry.indexOf(" -> ", sep3 + 1);
-			assertTrue("each entry should contain at least four ' -> ' separators: " + entry, sep4 >= 0);
-			assertTrue("each entry should contain exactly four ' -> ' separators: " + entry,
-					entry.indexOf(" -> ", sep4 + 1) < 0);
+			int sep5 = entry.indexOf(" -> ", sep4 + 1);
+			assertTrue("each entry should contain at least five ' -> ' separators: " + entry, sep5 >= 0);
+			assertTrue("each entry should contain exactly five ' -> ' separators: " + entry,
+					entry.indexOf(" -> ", sep5 + 1) < 0);
+
+			String countField = entry.substring(sep5 + 4).trim();
+			int count;
+			try {
+				count = Integer.parseInt(countField);
+			} catch (NumberFormatException e) {
+				fail("trailing field should be an integer count, got '" + countField + "' in entry: " + entry);
+				return;
+			}
+			assertTrue("count should be positive, got " + count + " in entry: " + entry, count > 0);
 		}
 	}
 }

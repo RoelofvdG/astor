@@ -71,12 +71,9 @@ public class ExpressionTypeIngredientSpace
 	@Override
 	public void defineSpace(ProgramVariant variant) throws IOException {
 
-		// Make file for outputting templates
-		File file = new File(ConfigurationProperties.getProperty("location"), "templates.txt");
-		FileWriter fw = new FileWriter(file, false);
-		BufferedWriter bw = new BufferedWriter(fw);
-
-
+		// Buffer (templateKey, lineWithoutCount) pairs; counts are appended in a
+		// second pass after linkTemplateElements is fully built.
+		List<String[]> templateLineBuffer = new ArrayList<>();
 
 		List<CtType<?>> affected = obtainClassesFromScope(variant);
 		log.debug("Creating Expression Ingredient space: ");
@@ -114,11 +111,12 @@ public class ExpressionTypeIngredientSpace
 
 						// Get information about the template for writing to file.
 						String returnTypeExpression = (ctExpr.getType() != null) ? ctExpr.getType().getSimpleName() : "null";
+						String templateKey = templateElement.toString();
 						String templateData = templateIngredient + " -> " + getType(templateIngredient) + " -> " + returnTypeExpression
 								+ " -> " + qualifiedClassName + " -> " + packageName;
 						System.out.println(templateData);
 
-						bw.write(templateData + "\n###\n");
+						templateLineBuffer.add(new String[] { templateKey, templateData });
 
 						// If the template is a binary operator (&&, ==, etc.)
 						// Create an additional template of the root operator.
@@ -136,7 +134,8 @@ public class ExpressionTypeIngredientSpace
 									+ " -> CtBinaryOperatorImpl -> "
 									+ returnTypeExpression
 									+ " -> " + qualifiedClassName + " -> " + packageName;
-							bw.write(rootTemplate + "\n###\n");
+							// Derived root template reuses the parent template's count.
+							templateLineBuffer.add(new String[] { templateKey, rootTemplate });
 						}
 
 						if (ConfigurationProperties.getPropertyBool("duplicateingredientsinspace")
@@ -164,8 +163,17 @@ public class ExpressionTypeIngredientSpace
 			}
 		}
 
-		bw.close();
-		fw.close();
+		// Second pass: write templates.txt with the per-template count appended.
+		File file = new File(ConfigurationProperties.getProperty("location"), "templates.txt");
+		try (BufferedWriter bw = new BufferedWriter(new FileWriter(file, false))) {
+			for (String[] entry : templateLineBuffer) {
+				String templateKey = entry[0];
+				String lineWithoutCount = entry[1];
+				List<Ingredient> occurrences = this.linkTemplateElements.get(templateKey);
+				int count = (occurrences != null) ? occurrences.size() : 0;
+				bw.write(lineWithoutCount + " -> " + count + "\n###\n");
+			}
+		}
 
 		writeTypeHierarchy();
 
