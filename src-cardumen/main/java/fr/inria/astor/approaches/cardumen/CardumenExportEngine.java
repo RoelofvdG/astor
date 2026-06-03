@@ -193,13 +193,18 @@ public class CardumenExportEngine extends CardumenApproach {
         Process proc = pb.start();
 
         List<String> candidates = new ArrayList<>();
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(proc.getInputStream()))) {
+        String outputFile = workingDir + File.separator + "julia_output.txt";
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+             BufferedWriter out = new BufferedWriter(new FileWriter(outputFile))) {
             String line;
             while ((line = br.readLine()) != null) {
+                out.write(line);
+                out.newLine();
                 if (line.startsWith(CANDIDATE_PREFIX))
                     candidates.add(line.substring(CANDIDATE_PREFIX.length()).trim());
             }
         }
+        log.info("CardumenExportEngine: Julia output written to " + outputFile);
         try (BufferedReader err = new BufferedReader(new InputStreamReader(proc.getErrorStream()))) {
             err.lines().forEach(l -> log.warn("julia stderr: " + l));
         }
