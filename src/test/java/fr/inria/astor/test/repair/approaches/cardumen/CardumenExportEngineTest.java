@@ -49,6 +49,7 @@ public class CardumenExportEngineTest extends BaseEvolutionaryTest {
 		cmd.command.put("-javacompliancelevel", "4");
 		cmd.command.put("-flthreshold", "0.1");
 		cmd.command.put("-maxtime", "60");
+		cmd.command.put("-maxgen", "1");
 		return cmd;
 	}
 

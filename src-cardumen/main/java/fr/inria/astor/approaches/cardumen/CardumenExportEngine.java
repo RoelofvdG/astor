@@ -21,6 +21,7 @@ import fr.inria.astor.core.entities.OperatorInstance;
 import fr.inria.astor.core.entities.ProgramVariant;
 import fr.inria.astor.core.entities.SuspiciousModificationPoint;
 import fr.inria.astor.core.manipulation.MutationSupporter;
+import fr.inria.astor.core.setup.ConfigurationProperties;
 import fr.inria.astor.core.setup.ProjectRepairFacade;
 import fr.inria.main.AstorOutputStatus;
 import spoon.reflect.code.CtExpression;
@@ -42,11 +43,24 @@ import spoon.reflect.visitor.filter.TypeFilter;
  * Cardumen variant that exports mined templates, in-scope context (variables and methods),
  * and suspicious-location type information to files for use by external tools.
  * <p>
+ * Iterates over suspicious modification points: each iteration overwrites
+ * context.txt / target_type.txt for the selected location, invokes the Julia tool
+ * (if configured), and tests each returned candidate. Stops on the first patch
+ * that passes tests, or after at most {@code maxGeneration} iterations (or sooner
+ * if the suspicious-point list is exhausted).
+ * <p>
+ * By default ({@code modificationpointnavigation=weight}) locations are
+ * visited in weighted-random order without replacement, weighted by their
+ * suspiciousness score. Pass {@code -suspiciousnavigation inorder} to walk
+ * them strictly in descending suspiciousness order, or {@code random} for
+ * uniform random selection.
+ * <p>
  * Outputs (relative to the working directory):
  *   templates.txt      - written by the ingredient space during setup (one template per line)
- *   context.txt        - in-scope variables and methods at the top-ranked modification point
- *   target_type.txt    - location and expression type of the top-ranked modification point
+ *   context.txt        - in-scope variables and methods at the current modification point
+ *   target_type.txt    - location and expression type of the current modification point
  *   type_hierarchy.txt - superclass and interface relations for types appearing in templates
+ * Only the last iteration's context.txt / target_type.txt / julia_output.txt survive on disk.
  * <p>
  * Invoke via:
  *   -mode custom -customengine fr.inria.astor.approaches.cardumen.CardumenExportEngine
@@ -82,29 +96,34 @@ public class CardumenExportEngine extends CardumenApproach {
             return;
         }
 
-        ModificationPoint target = points.get(0);
-        log.info("CardumenExportEngine: selected modification point: " + target);
-
         String projectDir = projectFacade.getProperties().getOriginalProjectRootDir();
-        exportContext(target, projectDir + File.separator + "context.txt");
-        exportTargetType(target, projectDir + File.separator + "target_type.txt");
-
         String toolPath = System.getProperty("cardumen.julia.tool");
-        List<String> candidates;
-        if (toolPath != null) {
-            candidates = invokeJuliaTool(toolPath, projectDir);
-            log.info("CardumenExportEngine: Julia tool returned " + candidates.size() + " candidate(s)");
-        } else {
-            log.info("CardumenExportEngine: no Julia tool configured, falling back to constant \""
-                    + CANDIDATE_EXPRESSION + "\"");
-            candidates = new ArrayList<>();
-            candidates.add(CANDIDATE_EXPRESSION);
-        }
+        int maxIters = Math.min(points.size(), ConfigurationProperties.getPropertyInt("maxGeneration"));
 
-        lastCandidates = candidates;
-        for (String candidate : candidates) {
-            applyAndTestCandidate(target, candidate);
-            if (this.outputStatus == AstorOutputStatus.STOP_BY_PATCH_FOUND) break;
+        outer:
+        for (int i = 0; i < maxIters; i++) {
+            ModificationPoint target = points.get(i);
+            log.info("CardumenExportEngine: iteration " + (i + 1) + "/" + maxIters + " at " + target);
+
+            exportContext(target, projectDir + File.separator + "context.txt");
+            exportTargetType(target, projectDir + File.separator + "target_type.txt");
+
+            List<String> candidates;
+            if (toolPath != null) {
+                candidates = invokeJuliaTool(toolPath, projectDir);
+                log.info("CardumenExportEngine: Julia tool returned " + candidates.size() + " candidate(s)");
+            } else {
+                log.info("CardumenExportEngine: no Julia tool configured, falling back to constant \""
+                        + CANDIDATE_EXPRESSION + "\"");
+                candidates = new ArrayList<>();
+                candidates.add(CANDIDATE_EXPRESSION);
+            }
+
+            lastCandidates = candidates;
+            for (String candidate : candidates) {
+                applyAndTestCandidate(target, candidate);
+                if (this.outputStatus == AstorOutputStatus.STOP_BY_PATCH_FOUND) break outer;
+            }
         }
 
         log.info("CardumenExportEngine: export complete");
