@@ -110,6 +110,36 @@ public class CardumenExportEngineTest extends BaseEvolutionaryTest {
 				content.contains("# Methods reachable via in-scope variables"));
 		assertTrue("should have fields section",
 				content.contains("# Fields of in-scope variables"));
+
+		// Every data line (non-blank, non-comment) must end with
+		// " : <globalCount> : <localCount>", with localCount <= globalCount.
+		int dataLines = 0;
+		for (String line : lines) {
+			if (line.isEmpty() || line.startsWith("#")) continue;
+			dataLines++;
+
+			int lastSep = line.lastIndexOf(" : ");
+			assertTrue("line should contain at least one ' : ' separator: " + line, lastSep >= 0);
+			int prevSep = line.lastIndexOf(" : ", lastSep - 1);
+			assertTrue("line should contain at least two ' : ' separators (for global and local counts): " + line,
+					prevSep >= 0);
+
+			String localStr  = line.substring(lastSep + 3).trim();
+			String globalStr = line.substring(prevSep + 3, lastSep).trim();
+
+			int global, local;
+			try {
+				global = Integer.parseInt(globalStr);
+				local  = Integer.parseInt(localStr);
+			} catch (NumberFormatException e) {
+				fail("trailing two fields should be integers, got global='" + globalStr
+						+ "' local='" + localStr + "' in line: " + line);
+				return;
+			}
+			assertTrue("counts should be non-negative in line: " + line, global >= 0 && local >= 0);
+			assertTrue("local count should not exceed global count in line: " + line, local <= global);
+		}
+		assertTrue("context.txt should contain at least one data line", dataLines > 0);
 	}
 
 	@Test
