@@ -22,10 +22,12 @@ import static org.junit.Assert.*;
  */
 public class CardumenExportEngineTest extends BaseEvolutionaryTest {
 
+	static final File BUG_DIR = new File("./examples/chart_11/").getAbsoluteFile();
+
 	/** Builds a CommandSummary pre-configured for chart_11. */
 	private static CommandSummary chart11Command() {
 		String depJunit = new File("./lib/junit-4.11.jar").getAbsolutePath();
-		String bugLocation = new File("./examples/chart_11/").getAbsolutePath();
+		String bugLocation = BUG_DIR.getAbsolutePath();
 
 		CommandSummary cmd = new CommandSummary();
 		cmd.command.put("-mode", "custom");
@@ -58,10 +60,10 @@ public class CardumenExportEngineTest extends BaseEvolutionaryTest {
 		CardumenExportEngine engine = (CardumenExportEngine) main.getEngine();
 		assertEquals(AstorOutputStatus.EXHAUSTIVE_NAVIGATED, engine.getOutputStatus());
 
-		File templates  = new File("templates.txt");
-		File context    = new File("context.txt");
-		File target     = new File("target_type.txt");
-		File hierarchy  = new File("type_hierarchy.txt");
+		File templates  = new File(BUG_DIR, "templates.txt");
+		File context    = new File(BUG_DIR, "context.txt");
+		File target     = new File(BUG_DIR, "target_type.txt");
+		File hierarchy  = new File(BUG_DIR, "type_hierarchy.txt");
 
 		assertTrue("templates.txt should exist",        templates.exists());
 		assertTrue("context.txt should exist",          context.exists());
@@ -78,7 +80,7 @@ public class CardumenExportEngineTest extends BaseEvolutionaryTest {
 		AstorMain main = new AstorMain();
 		main.execute(chart11Command().flat());
 
-		List<String> lines = Files.readAllLines(new File("target_type.txt").toPath());
+		List<String> lines = Files.readAllLines(new File(BUG_DIR, "target_type.txt").toPath());
 		String content = String.join("\n", lines);
 
 		assertTrue("should contain class field",          content.contains("class:"));
@@ -97,7 +99,7 @@ public class CardumenExportEngineTest extends BaseEvolutionaryTest {
 		AstorMain main = new AstorMain();
 		main.execute(chart11Command().flat());
 
-		List<String> lines = Files.readAllLines(new File("context.txt").toPath());
+		List<String> lines = Files.readAllLines(new File(BUG_DIR, "context.txt").toPath());
 		String content = String.join("\n", lines);
 
 		assertTrue("should have Variables section",
@@ -115,7 +117,7 @@ public class CardumenExportEngineTest extends BaseEvolutionaryTest {
 		AstorMain main = new AstorMain();
 		main.execute(chart11Command().flat());
 
-		List<String> lines = Files.readAllLines(new File("type_hierarchy.txt").toPath());
+		List<String> lines = Files.readAllLines(new File(BUG_DIR, "type_hierarchy.txt").toPath());
 		for (String line : lines) {
 			if (line.trim().isEmpty()) continue;
 			// Each line must be: SimpleName -> (extends|implements) -> qualified.Name
@@ -127,11 +129,29 @@ public class CardumenExportEngineTest extends BaseEvolutionaryTest {
 	}
 
 	@Test
+	public void testJuliaToolReturnsCandidates() throws Exception {
+		String home = System.getProperty("user.home");
+		System.setProperty("cardumen.julia.tool",    home + "/thesis/herb/find2fix.jl");
+		System.setProperty("cardumen.julia.project", home + "/thesis/herb");
+		try {
+			AstorMain main = new AstorMain();
+			main.execute(chart11Command().flat());
+
+			CardumenExportEngine engine = (CardumenExportEngine) main.getEngine();
+			assertFalse("Julia tool should return at least one candidate",
+					engine.getLastCandidates().isEmpty());
+		} finally {
+			System.clearProperty("cardumen.julia.tool");
+			System.clearProperty("cardumen.julia.project");
+		}
+	}
+
+	@Test
 	public void testTemplatesFileContainsTypedEntries() throws Exception {
 		AstorMain main = new AstorMain();
 		main.execute(chart11Command().flat());
 
-		List<String> lines = Files.readAllLines(new File("templates.txt").toPath());
+		List<String> lines = Files.readAllLines(new File(BUG_DIR, "templates.txt").toPath());
 
         assertFalse("templates.txt should have at least one entry", lines.isEmpty());
 

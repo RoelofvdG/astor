@@ -1,8 +1,12 @@
 package fr.inria.astor.approaches.cardumen;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -40,6 +44,11 @@ import spoon.reflect.reference.CtTypeReference;
 public class CardumenExportEngine extends CardumenApproach {
 
     private static final String CANDIDATE_EXPRESSION = "0";
+    private static final String CANDIDATE_PREFIX = "Testing candidate: ";
+
+    private List<String> lastCandidates = new ArrayList<>();
+
+    public List<String> getLastCandidates() { return lastCandidates; }
 
     public CardumenExportEngine(MutationSupporter mutatorExecutor, ProjectRepairFacade projFacade)
             throws JSAPException {
@@ -63,9 +72,27 @@ public class CardumenExportEngine extends CardumenApproach {
         ModificationPoint target = points.get(0);
         log.info("CardumenExportEngine: selected modification point: " + target);
 
-        exportContext(target, "context.txt");
-        exportTargetType(target, "target_type.txt");
-        applyAndTestCandidate(target, CANDIDATE_EXPRESSION);
+        String projectDir = projectFacade.getProperties().getOriginalProjectRootDir();
+        exportContext(target, projectDir + File.separator + "context.txt");
+        exportTargetType(target, projectDir + File.separator + "target_type.txt");
+
+        String toolPath = System.getProperty("cardumen.julia.tool");
+        List<String> candidates;
+        if (toolPath != null) {
+            candidates = invokeJuliaTool(toolPath, projectDir);
+            log.info("CardumenExportEngine: Julia tool returned " + candidates.size() + " candidate(s)");
+        } else {
+            log.info("CardumenExportEngine: no Julia tool configured, falling back to constant \""
+                    + CANDIDATE_EXPRESSION + "\"");
+            candidates = new ArrayList<>();
+            candidates.add(CANDIDATE_EXPRESSION);
+        }
+
+        lastCandidates = candidates;
+        for (String candidate : candidates) {
+            applyAndTestCandidate(target, candidate);
+            if (this.outputStatus == AstorOutputStatus.STOP_BY_PATCH_FOUND) break;
+        }
 
         log.info("CardumenExportEngine: export complete");
         if (this.outputStatus == null) {
@@ -154,6 +181,31 @@ public class CardumenExportEngine extends CardumenApproach {
             }
         }
         log.info("CardumenExportEngine: context written to " + filename);
+    }
+
+    private List<String> invokeJuliaTool(String toolPath, String workingDir) throws IOException, InterruptedException {
+        String juliaProject = System.getProperty("cardumen.julia.project");
+        ProcessBuilder pb = juliaProject != null
+                ? new ProcessBuilder("julia", "--project=" + juliaProject, toolPath)
+                : new ProcessBuilder("julia", toolPath);
+        pb.directory(new File(workingDir));
+        pb.redirectErrorStream(false);
+        Process proc = pb.start();
+
+        List<String> candidates = new ArrayList<>();
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(proc.getInputStream()))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.startsWith(CANDIDATE_PREFIX))
+                    candidates.add(line.substring(CANDIDATE_PREFIX.length()).trim());
+            }
+        }
+        try (BufferedReader err = new BufferedReader(new InputStreamReader(proc.getErrorStream()))) {
+            err.lines().forEach(l -> log.warn("julia stderr: " + l));
+        }
+        int exit = proc.waitFor();
+        if (exit != 0) log.error("CardumenExportEngine: Julia tool exited with code " + exit);
+        return candidates;
     }
 
     private void applyAndTestCandidate(ModificationPoint mp, String candidateExpr) throws Exception {

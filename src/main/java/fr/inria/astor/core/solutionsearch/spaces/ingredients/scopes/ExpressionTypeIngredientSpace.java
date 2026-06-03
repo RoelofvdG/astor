@@ -72,7 +72,7 @@ public class ExpressionTypeIngredientSpace
 	public void defineSpace(ProgramVariant variant) throws IOException {
 
 		// Make file for outputting templates
-		File file = new File("templates.txt");
+		File file = new File(ConfigurationProperties.getProperty("location"), "templates.txt");
 		FileWriter fw = new FileWriter(file, false);
 		BufferedWriter bw = new BufferedWriter(fw);
 
@@ -367,7 +367,7 @@ public class ExpressionTypeIngredientSpace
 	}
 
 	private void writeTypeHierarchy() throws IOException {
-		File file = new File("type_hierarchy.txt");
+		File file = new File(ConfigurationProperties.getProperty("location"), "type_hierarchy.txt");
 		FileWriter fw = new FileWriter(file, false);
 		BufferedWriter bw = new BufferedWriter(fw);
 
