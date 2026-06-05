@@ -315,8 +315,8 @@ public class CardumenExportEngine extends CardumenApproach {
     private List<String> invokeJuliaTool(String toolPath, String workingDir) throws IOException, InterruptedException {
         String juliaProject = System.getProperty("cardumen.julia.project");
         ProcessBuilder pb = juliaProject != null
-                ? new ProcessBuilder("julia", "--project=" + juliaProject, toolPath)
-                : new ProcessBuilder("julia", toolPath);
+                ? new ProcessBuilder("julia", "--project=" + juliaProject, toolPath, "--production")
+                : new ProcessBuilder("julia", toolPath, "--production");
         pb.directory(new File(workingDir));
         pb.redirectErrorStream(false);
         Process proc = pb.start();
@@ -351,6 +351,9 @@ public class CardumenExportEngine extends CardumenApproach {
         CtExpression<?> candidate =
                 MutationSupporter.getFactory().Code().createCodeSnippetExpression(candidateExpr);
 
+        // Capture the original code before applyChangesInModel replaces it in the model.
+        String originalCode = mp.getCodeElement().toString();
+
         ExpressionReplaceOperator op = new ExpressionReplaceOperator();
         OperatorInstance opInstance = new OperatorInstance(mp, op, mp.getCodeElement(), candidate);
 
@@ -362,6 +365,7 @@ public class CardumenExportEngine extends CardumenApproach {
             return;
         }
 
+        log.info("CardumenExportEngine: original code at suspicious location: \"" + originalCode + "\"");
         log.info("CardumenExportEngine: testing candidate expression \"" + candidateExpr + "\"");
 
         try {
