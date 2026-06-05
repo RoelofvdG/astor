@@ -50,9 +50,15 @@ REAP_INTERVAL=${REAP_INTERVAL:-60}
 reaper_loop() {
     while true; do
         sleep "$REAP_INTERVAL"
-        ps -eo pid=,etimes=,args= 2>/dev/null | awk -v age="$REAP_AGE" '
+        pids=$(ps -eo pid=,etimes=,args= 2>/dev/null | awk -v age="$REAP_AGE" '
             $0 ~ /JUnit(Nolog)?ExternalExecutor/ && $0 !~ /AstorMain/ && ($2+0) > age { print $1 }
-        ' | xargs -r kill -9 2>/dev/null || true
+        ')
+        n=0
+        if [ -n "$pids" ]; then
+            n=$(printf '%s\n' "$pids" | wc -l)
+            printf '%s\n' "$pids" | xargs -r kill -9 2>/dev/null || true
+        fi
+        echo "[reaper $(date +%H:%M:%S)] killed $n orphaned test JVM(s)"
     done
 }
 RESULTS_ROOT=${RESULTS_ROOT:-./d4j-cardumen-results}
