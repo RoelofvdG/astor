@@ -48,8 +48,10 @@ REAP_INTERVAL=${REAP_INTERVAL:-60}
 # ONLY Astor's JUnit executor processes (never the AstorMain repair process) and only
 # those older than REAP_AGE, so in-flight validations are never touched.
 reaper_loop() {
+    local parent=$1   # orchestrator PID; self-exit if it dies (covers kill -9, where traps can't run)
     while true; do
         sleep "$REAP_INTERVAL"
+        kill -0 "$parent" 2>/dev/null || exit 0   # orchestrator gone -> stop reaping
         pids=$(ps -eo pid=,etimes=,args= 2>/dev/null | awk -v age="$REAP_AGE" '
             $0 ~ /JUnit(Nolog)?ExternalExecutor/ && $0 !~ /AstorMain/ && ($2+0) > age { print $1 }
         ')
@@ -113,11 +115,16 @@ TASKS=$(mktemp)
 # Start the reaper and ensure it (and the temp file) are cleaned up on exit.
 REAPER_PID=""
 if [ "$REAP" = "true" ]; then
-    reaper_loop &
+    reaper_loop "$$" &        # pass our PID so the reaper self-exits if we die
     REAPER_PID=$!
     echo ">> reaper on: sweeping orphaned test JVMs older than ${REAP_AGE}s every ${REAP_INTERVAL}s"
 fi
-trap '[ -n "$REAPER_PID" ] && kill "$REAPER_PID" 2>/dev/null; rm -f "$TASKS"' EXIT
+# Kill the reaper promptly on normal exit and on common termination signals.
+# (SIGKILL can't be trapped, but the reaper also watches our PID and self-exits.)
+cleanup() { [ -n "$REAPER_PID" ] && kill "$REAPER_PID" 2>/dev/null; rm -f "$TASKS"; }
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM HUP
 
 for p in "${PROJECTS[@]}"; do
     # bids prints numeric ids on stdout (a harmless Perl warning may go to stderr).
