@@ -31,3 +31,5 @@ examples/Math-issue-280/target/
 
 # Template output
 **/*.txt
+tempdj4/
+output_astor/
