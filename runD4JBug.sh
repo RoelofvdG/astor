@@ -28,8 +28,10 @@ ASTOR_JAR=${ASTOR_JAR:-$HOME/thesis/astor/target/astor-2.0.0-jar-with-dependenci
 JULIA_TOOL=${JULIA_TOOL:-$HOME/thesis/herb/find2fix.jl}
 JULIA_PROJECT=${JULIA_PROJECT:-$HOME/thesis/herb}
 WORK_ROOT=${WORK_ROOT:-./tempdj4}   # root under which per-bug working dirs live
+OUT=${OUT:-}                        # astor output root (-out); empty = astor default
 JAVA_LEVEL=${JAVA_LEVEL:-8}         # -javacompliancelevel
 MAXTIME=${MAXTIME:-60}              # -maxtime, in minutes
+STOPFIRST=${STOPFIRST:-true}        # -stopfirst: stop this bug once the 1st patch is found (set false to keep searching)
 
 # --- argument parsing --------------------------------------------------------
 usage() {
@@ -108,10 +110,23 @@ else
     MODE_ARGS=( -mode cardumen )
 fi
 
+# Resolve the output directory (always explicit). Astor writes results to
+# <OUTDIR>/AstorMain-<id>. We also run the JVM with this as its working
+# directory so the GZoltar/JaCoCo coverage file (test-runner.exec) is written
+# here, beside the bug's output, instead of polluting the launch directory.
+# Per-bug OUTDIR also keeps parallel runs from clobbering each other's .exec.
+if [ -n "$OUT" ]; then
+    mkdir -p "$OUT"; OUTDIR=$(cd "$OUT" && pwd)
+else
+    OUTDIR="$(pwd)/output_astor"; mkdir -p "$OUTDIR"   # astor's default location
+fi
+ASTOR_JAR=$(cd "$(dirname "$ASTOR_JAR")" && pwd)/$(basename "$ASTOR_JAR")  # absolutize for cwd change
+
 # --- run astor ---------------------------------------------------------------
-echo ">> Running Astor"
-java "${JVM_PROPS[@]}" -cp "$ASTOR_JAR" fr.inria.main.evolution.AstorMain \
+echo ">> Running Astor (cwd=$OUTDIR)"
+( cd "$OUTDIR" && exec java "${JVM_PROPS[@]}" -cp "$ASTOR_JAR" fr.inria.main.evolution.AstorMain \
     "${MODE_ARGS[@]}" \
+    -out "$OUTDIR" \
     -id "$BUG_ID" \
     -location "$LOCATION" \
     -srcjavafolder "/$SRC_DIR" \
@@ -127,6 +142,6 @@ java "${JVM_PROPS[@]}" -cp "$ASTOR_JAR" fr.inria.main.evolution.AstorMain \
     -flthreshold 0.1 \
     -maxgen 1000000 \
     -maxtime "$MAXTIME" \
-    -stopfirst true \
+    -stopfirst "$STOPFIRST" \
     -parameters keepcomments:false \
-    -loglevel INFO
+    -loglevel INFO )
