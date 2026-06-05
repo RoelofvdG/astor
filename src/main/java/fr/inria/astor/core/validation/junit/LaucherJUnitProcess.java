@@ -125,8 +125,13 @@ public class LaucherJUnitProcess {
 					p_stdin.write("echo $TZ");
 					p_stdin.newLine();
 					p_stdin.flush();
-					// Writing the command
-					p_stdin.write(toString(command));
+					// Writing the command. Prefix with "exec" so bash replaces
+					// itself with the test JVM (same PID): then p IS the java
+					// process and p.destroyForcibly() on timeout actually kills it,
+					// instead of killing bash and orphaning a 2GB test JVM. The
+					// previous "kill pid+1" heuristic in killProcess() is unreliable
+					// (and essentially always wrong when JVMs spawn in parallel).
+					p_stdin.write("exec " + toString(command));
 
 					p_stdin.newLine();
 					p_stdin.flush();
@@ -212,24 +217,18 @@ public class LaucherJUnitProcess {
 				+ TimeUnit.MILLISECONDS.toSeconds(waitTime) + " seconds");
 		log.info("Killing the Process that runs JUnit test cases " + pid);
 
-		// workarrond!!
-		if (ConfigurationProperties.getPropertyBool("forcesubprocesskilling")) {
-			Integer subprocessid = Integer.valueOf(pid.toString()) + 1;
+		// On Linux the test command is exec'd inside bash (see execute()), so p IS
+		// the test JVM and destroyForcibly() above already SIGKILLed the right PID.
+		// The old "kill pid+1" heuristic would now hit an unrelated neighbour PID
+		// (dangerous under parallel runs), so it is gone. On Windows the process is
+		// launched via PowerShell (no exec), so its tree must still be torn down.
+		if (procWinUUID != null && ConfigurationProperties.getPropertyBool("forcesubprocesskilling")) {
 			try {
-				Process process;
-				if (procWinUUID != null) {
-					log.error("Killing Windows process " + pid);
-					process = Runtime.getRuntime().exec("taskkill /T /F /PID " + pid);
-				} else {
-					log.debug("Killing subprocess " + subprocessid);
-					process = new ProcessBuilder(new String[] { "kill", subprocessid.toString() }).start();
-				}
+				log.error("Killing Windows process " + pid);
+				Process process = Runtime.getRuntime().exec("taskkill /T /F /PID " + pid);
 				process.waitFor();
 			} catch (IOException | InterruptedException e) {
-				if (procWinUUID != null) 
-					log.error("Problems killing Windows process " + pid);
-				else
-					log.error("Problems killing subprocess " + subprocessid);
+				log.error("Problems killing Windows process " + pid);
 				log.error(e);
 			}
 		}

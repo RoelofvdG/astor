@@ -26,6 +26,10 @@
 #   JAVA_LEVEL    -javacompliancelevel (default 8)
 #   STOPFIRST     stop each bug once the 1st patch is found (default true; set false to keep searching)
 #   FORCE=1       ignore existing .done markers and re-run
+#   REAP          run the orphaned-test-JVM reaper (default true; set false to disable)
+#   REAP_AGE      kill orphaned test JVMs older than this many seconds (default 660;
+#                 must exceed Astor's per-validation timeout tmax2, default 600s)
+#   REAP_INTERVAL seconds between reaper sweeps (default 60)
 
 set -euo pipefail
 
@@ -34,6 +38,23 @@ RUN_ONE="$SCRIPT_DIR/runD4JBug.sh"
 
 D4J_BIN=${D4J_BIN:-$HOME/thesis/defects4j-2.0/framework/bin}
 DEFECTS4J="$D4J_BIN/defects4j"
+REAP=${REAP:-true}
+REAP_AGE=${REAP_AGE:-660}
+REAP_INTERVAL=${REAP_INTERVAL:-60}
+
+# Safety-net reaper: Astor forks a 2GB test JVM per candidate validation and, on a
+# timeout, can fail to kill it (orphaning it). Even with the source-level fix this
+# periodically sweeps any test JVM that outlived its validation timeout. It targets
+# ONLY Astor's JUnit executor processes (never the AstorMain repair process) and only
+# those older than REAP_AGE, so in-flight validations are never touched.
+reaper_loop() {
+    while true; do
+        sleep "$REAP_INTERVAL"
+        ps -eo pid=,etimes=,args= 2>/dev/null | awk -v age="$REAP_AGE" '
+            $0 ~ /JUnit(Nolog)?ExternalExecutor/ && $0 !~ /AstorMain/ && ($2+0) > age { print $1 }
+        ' | xargs -r kill -9 2>/dev/null || true
+    done
+}
 RESULTS_ROOT=${RESULTS_ROOT:-./d4j-cardumen-results}
 
 # --- worker mode: invoked by xargs once per bug -----------------------------
@@ -83,7 +104,15 @@ fi
 
 mkdir -p "$RESULTS_ROOT"
 TASKS=$(mktemp)
-trap 'rm -f "$TASKS"' EXIT
+
+# Start the reaper and ensure it (and the temp file) are cleaned up on exit.
+REAPER_PID=""
+if [ "$REAP" = "true" ]; then
+    reaper_loop &
+    REAPER_PID=$!
+    echo ">> reaper on: sweeping orphaned test JVMs older than ${REAP_AGE}s every ${REAP_INTERVAL}s"
+fi
+trap '[ -n "$REAPER_PID" ] && kill "$REAPER_PID" 2>/dev/null; rm -f "$TASKS"' EXIT
 
 for p in "${PROJECTS[@]}"; do
     # bids prints numeric ids on stdout (a harmless Perl warning may go to stderr).
