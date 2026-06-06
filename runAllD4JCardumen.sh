@@ -7,6 +7,8 @@
 #   <Project>-<Version>/astor-output/  Astor's output (AstorMain-<id>/ inside)
 #   <Project>-<Version>/run.log        full stdout/stderr of the run
 #   <Project>-<Version>/.done          marker written on success (run is skipped if present)
+#   <Project>-<Version>/.error         marker written on failure, holds the exit code
+#                                       (run is skipped if present; not written for exit 130/Ctrl+C)
 #
 # Usage:
 #   ./runAllD4JCardumen.sh [parallelism] [Project ...]
@@ -69,26 +71,39 @@ RESULTS_ROOT=${RESULTS_ROOT:-./d4j-cardumen-results}
 if [ "${1:-}" = "--worker" ]; then
     project=$2
     version=$3
+    index=${4:-?}                       # this bug's position in the task list (for the log prefix)
     id="${project}-${version}"
     bugdir="$RESULTS_ROOT/$id"
     mkdir -p "$bugdir"
 
-    if [ -z "${FORCE:-}" ] && [ -f "$bugdir/.done" ]; then
-        echo "[skip] $id (already done)"
+    # Prefix every per-bug line with a timestamp and "<index>/<total>" progress counter.
+    # TOTAL is exported by the main process; ? is a fallback for manual --worker calls.
+    log() { printf '%s %s/%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$index" "${TOTAL:-?}" "$*"; }
+
+    if [ -z "${FORCE:-}" ] && { [ -f "$bugdir/.done" ] || [ -f "$bugdir/.error" ]; }; then
+        log "[skip] $id (already attempted)"
         exit 0
     fi
 
-    echo "[start] $id"
+    log "[start] $id"
     # Per-bug isolation: separate checkout root and Astor output dir.
     if OUT="$bugdir/astor-output" WORK_ROOT="$bugdir/checkout" \
            "$RUN_ONE" "$project" "$version" cardumen > "$bugdir/run.log" 2>&1; then
+        rm -f "$bugdir/.error"          # clear any stale marker from a prior FORCE run
         touch "$bugdir/.done"
-        echo "[ok]   $id"
+        log "[ok]   $id"
     else
         rc=$?
-        echo "[fail] $id (exit $rc; see $bugdir/run.log)"
         # Astor exits non-zero when no patch is found, which is a normal outcome,
         # so do not abort the whole batch on a single failure.
+        if [ "$rc" -eq 130 ]; then
+            # 130 = terminated by SIGINT (Ctrl+C); not a real outcome, leave unmarked.
+            log "[int]  $id (interrupted, exit 130; no marker written)"
+        else
+            rm -f "$bugdir/.done"       # clear any stale marker from a prior FORCE run
+            echo "$rc" > "$bugdir/.error"
+            log "[fail] $id (exit $rc; see $bugdir/run.log)"
+        fi
     fi
     exit 0
 fi
@@ -126,14 +141,20 @@ trap cleanup EXIT
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM HUP
 
+# Each task line is "Project Version Index", where Index is the bug's 1-based
+# position across all enumerated bugs. Workers echo it as "<Index>/<TOTAL>".
+idx=0
 for p in "${PROJECTS[@]}"; do
     # bids prints numeric ids on stdout (a harmless Perl warning may go to stderr).
     while read -r b; do
-        [ -n "$b" ] && printf '%s %s\n' "$p" "$b" >> "$TASKS"
+        [ -n "$b" ] || continue
+        idx=$((idx + 1))
+        printf '%s %s %s\n' "$p" "$b" "$idx" >> "$TASKS"
     done < <("$DEFECTS4J" bids -p "$p" 2>/dev/null | grep -E '^[0-9]+$')
 done
 
 total=$(wc -l < "$TASKS")
+export TOTAL="$total"   # forwarded to workers for the "<index>/<total>" log prefix
 echo ">> ${total} bugs across ${#PROJECTS[@]} project(s): ${PROJECTS[*]}"
 echo ">> running ${N} in parallel; results under $RESULTS_ROOT"
 
@@ -142,5 +163,6 @@ echo ">> running ${N} in parallel; results under $RESULTS_ROOT"
 xargs -P "$N" -L1 bash -c '"$0" --worker "$@"' "$SCRIPT_DIR/runAllD4JCardumen.sh" < "$TASKS"
 
 done_count=$(find "$RESULTS_ROOT" -maxdepth 2 -name .done | wc -l)
-echo ">> finished. ${done_count}/${total} bugs completed successfully (have .done markers)."
+error_count=$(find "$RESULTS_ROOT" -maxdepth 2 -name .error | wc -l)
+echo ">> finished. ${done_count}/${total} bugs completed successfully (have .done markers); ${error_count} failed (have .error markers)."
 echo ">> per-bug logs: $RESULTS_ROOT/<Project>-<Version>/run.log"
