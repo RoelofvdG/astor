@@ -76,6 +76,8 @@ public class ExpressionTypeIngredientSpace
 		List<String[]> templateLineBuffer = new ArrayList<>();
 
 		List<CtType<?>> affected = obtainClassesFromScope(variant);
+		log.debug("[DEBUG defineSpace] classes from scope (" + scope + "): "
+				+ affected.stream().map(c -> c.getQualifiedName()).collect(java.util.stream.Collectors.joining(", ")));
 		log.debug("Creating Expression Ingredient space: ");
 		for (CtType<?> classToProcess : affected) {
 

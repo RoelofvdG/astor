@@ -116,6 +116,9 @@ public class ProgramVariantFactory {
 		log.debug("Creating variant " + idProgramInstance);
 
 		if (!suspiciousList.isEmpty()) {
+			java.util.Set<String> suspClasses = new java.util.LinkedHashSet<>();
+			for (SuspiciousCode sc : suspiciousList) suspClasses.add(sc.getClassName());
+			log.debug("[DEBUG suspiciousList] distinct classes: " + suspClasses);
 			int maxModPoints = ConfigurationProperties.getPropertyInt("maxmodificationpoints");
 			for (SuspiciousCode suspiciousCode : suspiciousList) {
 
