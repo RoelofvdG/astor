@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 #
-# Run plain Cardumen on every active bug in Defects4J v2.0, in parallel.
+# Run Cardumen on every active bug in Defects4J v2.0, in parallel.
+#
+# Two repair engines are selectable via --engine (default: cardumen):
+#   cardumen   plain Cardumen template-based repair
+#   export     CardumenExportEngine (-customengine ...) + Julia find2fix.jl tool
 #
 # Each bug gets its own directory under $RESULTS_ROOT containing:
 #   <Project>-<Version>/checkout/      the defects4j working copy
@@ -11,19 +15,29 @@
 #                                       (run is skipped if present; not written for exit 130/Ctrl+C)
 #
 # Usage:
-#   ./runAllD4JCardumen.sh [parallelism] [Project ...]
+#   ./runAllD4JCardumen.sh [--engine export|cardumen] [parallelism] [Project ...]
 #
+#   --engine, -e  repair engine: 'cardumen' (default) or 'export'. May also be set
+#                 via the ENGINE env var; the flag wins if both are given.
 #   parallelism   number of bugs to run concurrently (default 4)
 #   Project ...   optional list of projects to restrict to (default: all 17)
 #
 # Examples:
-#   ./runAllD4JCardumen.sh 8                 # all bugs, 8 at a time
-#   ./runAllD4JCardumen.sh 4 Math Lang       # only Math and Lang bugs, 4 at a time
+#   ./runAllD4JCardumen.sh 8                  # all bugs, 8 at a time, plain cardumen
+#   ./runAllD4JCardumen.sh 4 Math Lang        # only Math and Lang bugs, 4 at a time
+#   ./runAllD4JCardumen.sh --engine export 8  # all bugs via CardumenExportEngine
+#   ./runAllD4JCardumen.sh -e export 4 Math   # export engine on Math, 4 at a time
 #   MAXTIME=20 RESULTS_ROOT=/data/d4j ./runAllD4JCardumen.sh 16
-#   FORCE=1 ./runAllD4JCardumen.sh 8 Chart   # re-run even bugs already marked .done
+#   FORCE=1 ./runAllD4JCardumen.sh 8 Chart    # re-run even bugs already marked .done
+#
+# The 'export' engine honors the JULIA_TOOL / JULIA_PROJECT env vars (read by
+# runD4JBug.sh, which warns and falls back to constant '0' if the tool is missing).
 #
 # Env overrides (also forwarded to runD4JBug.sh):
-#   RESULTS_ROOT  where per-bug directories are created (default ./d4j-cardumen-results)
+#   ENGINE        repair engine (default cardumen); overridden by --engine/-e
+#   RESULTS_ROOT  where per-bug directories are created
+#                 (default ./d4j-cardumen-results, or ./d4j-cardumen-export-results
+#                  when --engine export is used)
 #   MAXTIME       per-bug Astor time budget in minutes (default from runD4JBug.sh: 60)
 #   JAVA_LEVEL    -javacompliancelevel (default 8)
 #   STOPFIRST     stop each bug once the 1st patch is found (default true; set false to keep searching)
@@ -64,7 +78,21 @@ reaper_loop() {
         fi
     done
 }
-RESULTS_ROOT=${RESULTS_ROOT:-./d4j-cardumen-results}
+# Engine + results-root resolution.
+# In worker mode the engine arrives via the exported ENGINE env var; in main mode it
+# may be overridden by --engine/-e (parsed below, which re-runs resolve_results_root).
+RESULTS_ROOT_ENV=${RESULTS_ROOT:-}      # capture an explicit user override, if any
+ENGINE=${ENGINE:-cardumen}
+resolve_results_root() {                # default depends on the engine; override wins
+    if [ -n "$RESULTS_ROOT_ENV" ]; then
+        RESULTS_ROOT=$RESULTS_ROOT_ENV
+    elif [ "$ENGINE" = export ]; then
+        RESULTS_ROOT=./d4j-cardumen-export-results
+    else
+        RESULTS_ROOT=./d4j-cardumen-results
+    fi
+}
+resolve_results_root
 
 # --- worker mode: invoked by xargs once per bug -----------------------------
 # Runs a single bug with its own output/checkout/log directories, then marks it done.
@@ -88,7 +116,7 @@ if [ "${1:-}" = "--worker" ]; then
     log "[start] $id"
     # Per-bug isolation: separate checkout root and Astor output dir.
     if OUT="$bugdir/astor-output" WORK_ROOT="$bugdir/checkout" \
-           "$RUN_ONE" "$project" "$version" cardumen > "$bugdir/run.log" 2>&1; then
+           "$RUN_ONE" "$project" "$version" "$ENGINE" > "$bugdir/run.log" 2>&1; then
         rm -f "$bugdir/.error"          # clear any stale marker from a prior FORCE run
         touch "$bugdir/.done"
         log "[ok]   $id"
@@ -109,6 +137,23 @@ if [ "${1:-}" = "--worker" ]; then
 fi
 
 # --- main: enumerate bugs and dispatch in parallel --------------------------
+# Parse leading --engine/-e options before the parallelism positional.
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -e|--engine) [ $# -ge 2 ] || { echo "Error: $1 requires a value" >&2; exit 2; }
+                     ENGINE=$2; shift 2 ;;
+        --engine=*)  ENGINE=${1#*=}; shift ;;
+        --)          shift; break ;;
+        -*)          echo "Error: unknown option '$1'" >&2; exit 2 ;;
+        *)           break ;;
+    esac
+done
+case "$ENGINE" in
+    export|cardumen) ;;
+    *) echo "Error: engine must be 'export' or 'cardumen', got '$ENGINE'" >&2; exit 2 ;;
+esac
+resolve_results_root   # re-resolve in case --engine changed the engine
+
 N=${1:-4}
 case "$N" in
     ''|*[!0-9]*) echo "Error: parallelism must be a positive integer, got '$N'" >&2; exit 2 ;;
@@ -154,9 +199,11 @@ for p in "${PROJECTS[@]}"; do
 done
 
 total=$(wc -l < "$TASKS")
-export TOTAL="$total"   # forwarded to workers for the "<index>/<total>" log prefix
+export TOTAL="$total"          # forwarded to workers for the "<index>/<total>" log prefix
+export ENGINE                  # so each xargs worker uses the chosen engine
+export RESULTS_ROOT            # so workers inherit the resolved results directory
 echo ">> ${total} bugs across ${#PROJECTS[@]} project(s): ${PROJECTS[*]}"
-echo ">> running ${N} in parallel; results under $RESULTS_ROOT"
+echo ">> engine=${ENGINE}; running ${N} in parallel; results under $RESULTS_ROOT"
 
 # One worker invocation per "Project Version" line, N concurrent.
 # bash -c forwards the two line tokens as $1 $2 to the worker.
