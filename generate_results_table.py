@@ -6,8 +6,9 @@ Usage:
     python generate_results_table.py <results-dir> [output.tex]
 
 For each <Project>-<ID> directory found in <results-dir>, emits a table row
-with the project name, bug id, whether a diffSolutions folder was found, and
-two empty columns (BFS, MLFS) for manual completion.
+with the project name, bug id, whether a diffSolutions folder was found
+(Cardumen), whether the matching ExportEngine run found a patch (BFS, read
+from --bfs-dir), and one empty column (MLFS) for manual completion.
 
 Required LaTeX packages (add to preamble):
     \\usepackage{booktabs}   % toprule/midrule/bottomrule/cmidrule
@@ -16,6 +17,7 @@ Required LaTeX packages (add to preamble):
 """
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -23,7 +25,30 @@ from itertools import groupby
 from pathlib import Path
 
 
-def find_bugs(results_dir):
+def bfs_patch_found(bfs_dir, project, bug_id):
+    """Return True if the ExportEngine run for this bug found a patch.
+
+    The export engine writes an ``astor_output.json`` whose
+    ``general.OUTPUT_STATUS`` is ``STOP_BY_PATCH_FOUND`` when a plausible
+    patch was synthesised. The patch list itself is not serialised, so the
+    status field is the reliable signal.
+    """
+    if bfs_dir is None:
+        return False
+    name = f"{project}-{bug_id}"
+    json_path = (
+        Path(bfs_dir) / name / "astor-output" / f"AstorMain-{name}" / "astor_output.json"
+    )
+    if not json_path.is_file():
+        return False
+    try:
+        data = json.loads(json_path.read_text())
+    except (ValueError, OSError):
+        return False
+    return data.get("general", {}).get("OUTPUT_STATUS") == "STOP_BY_PATCH_FOUND"
+
+
+def find_bugs(results_dir, bfs_dir=None):
     pattern = re.compile(r'^([A-Za-z][A-Za-z0-9]*)-(\d+)$')
     results_path = Path(results_dir)
     if not results_path.is_dir():
@@ -40,7 +65,8 @@ def find_bugs(results_dir):
         project = m.group(1)
         bug_id = int(m.group(2))
         has_patch = (entry / "astor-output" / "diffSolutions").is_dir()
-        bugs.append((project, bug_id, has_patch))
+        has_bfs = bfs_patch_found(bfs_dir, project, bug_id)
+        bugs.append((project, bug_id, has_patch, has_bfs))
 
     bugs.sort(key=lambda x: (x[0], x[1]))
     return bugs
@@ -106,10 +132,11 @@ def build_tabular(groups):
             lines.append(r"      \cmidrule{2-5}")
         count = len(items)
         proj_cell = r"\multirow{" + str(count) + r"}{*}{\centering " + project + r"}"
-        for i, (_, bug_id, has_patch) in enumerate(items):
+        for i, (_, bug_id, has_patch, has_bfs) in enumerate(items):
             mark = r"\Checkmark" if has_patch else r"\XSolidBrush"
+            bfs_mark = r"\Checkmark" if has_bfs else r"\XSolidBrush"
             cell = proj_cell if i == 0 else ""
-            lines.append(f"      {cell} & {bug_id} & {mark} & & \\\\")
+            lines.append(f"      {cell} & {bug_id} & {mark} & {bfs_mark} & \\\\")
 
     lines.append(r"      \bottomrule")
     lines.append(r"    \end{tabular}")
@@ -119,7 +146,7 @@ def build_tabular(groups):
 
 def generate_table(bugs, patches_only=True):
     if patches_only:
-        bugs = [(p, bid, hp) for p, bid, hp in bugs if hp]
+        bugs = [b for b in bugs if b[2] or b[3]]
     groups = group_bugs(bugs)
     parts = split_groups(groups, n=2)
 
@@ -182,9 +209,14 @@ def main():
     parser.add_argument("output", nargs="?", help="Output .tex file (default: stdout)")
     parser.add_argument("--copy", action="store_true", help="Copy the table to the clipboard")
     parser.add_argument("--all", action="store_true", help="Include bugs without a patch (default: patches only)")
+    parser.add_argument(
+        "--bfs-dir",
+        default="d4j-cardumen-export-results",
+        help="Path to the ExportEngine (BFS) results directory (default: d4j-cardumen-export-results)",
+    )
     args = parser.parse_args()
 
-    bugs = find_bugs(args.results_dir)
+    bugs = find_bugs(args.results_dir, args.bfs_dir)
     if not bugs:
         print("Warning: no <Project>-<ID> directories found.", file=sys.stderr)
 
