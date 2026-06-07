@@ -35,3 +35,7 @@ tempdj4/
 output_astor/
 d4j-cardumen-export-results/
 d4j-cardumen-results/
+**/context.txt
+**/target_type.txt
+**/templates.txt
+**/type_hierarchy.txt
