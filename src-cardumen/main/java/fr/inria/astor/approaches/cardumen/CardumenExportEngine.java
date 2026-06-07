@@ -380,6 +380,15 @@ public class CardumenExportEngine extends CardumenApproach {
         boolean passes;
         try {
             passes = processCreatedVariant(solutionVariant, generationsExecuted);
+        } catch (Exception e) {
+            // A malformed candidate can yield a variant that does not compile
+            // (e.g. Spoon throws IllegalStateException "no source files"). Treat it
+            // as a failed candidate and keep searching rather than aborting the whole
+            // run. Errors (e.g. OutOfMemoryError) are intentionally left to propagate.
+            log.warn("CardumenExportEngine: skipping candidate \"" + candidateExpr
+                    + "\" — could not compile/evaluate variant: "
+                    + e.getClass().getSimpleName() + ": " + e.getMessage());
+            return;
         } finally {
             // Revert the shared Spoon model before serializing: savePatch re-saves the
             // original variant from the current model, so the change must be undone
