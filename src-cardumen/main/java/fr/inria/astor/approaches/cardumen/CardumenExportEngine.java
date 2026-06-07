@@ -7,6 +7,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -357,9 +358,17 @@ public class CardumenExportEngine extends CardumenApproach {
         ExpressionReplaceOperator op = new ExpressionReplaceOperator();
         OperatorInstance opInstance = new OperatorInstance(mp, op, mp.getCodeElement(), candidate);
 
-        ProgramVariant variant = this.variants.get(0);
+        // Record the candidate as its own solution variant (with a distinct id from
+        // the original) and register the operation on it. This is what lets the
+        // standard atEnd() flow write a diffSolutions folder and a non-empty
+        // patches[] in astor_output.json when the candidate passes the tests.
+        ProgramVariant parent = this.variants.get(0);
+        this.generationsExecuted++;
+        ProgramVariant solutionVariant =
+                variantFactory.createProgramVariantFromAnother(parent, generationsExecuted);
+        solutionVariant.getOperations().put(generationsExecuted, Arrays.asList(opInstance));
 
-        boolean applied = op.applyChangesInModel(opInstance, variant);
+        boolean applied = op.applyChangesInModel(opInstance, solutionVariant);
         if (!applied) {
             log.error("CardumenExportEngine: failed to apply candidate \"" + candidateExpr + "\"");
             return;
@@ -368,16 +377,23 @@ public class CardumenExportEngine extends CardumenApproach {
         log.info("CardumenExportEngine: original code at suspicious location: \"" + originalCode + "\"");
         log.info("CardumenExportEngine: testing candidate expression \"" + candidateExpr + "\"");
 
+        boolean passes;
         try {
-            boolean passes = processCreatedVariant(variant, 1);
-            if (passes) {
-                log.info("CardumenExportEngine: candidate PASSES tests — patch accepted");
-                this.outputStatus = AstorOutputStatus.STOP_BY_PATCH_FOUND;
-            } else {
-                log.info("CardumenExportEngine: candidate FAILS tests");
-            }
+            passes = processCreatedVariant(solutionVariant, generationsExecuted);
         } finally {
-            op.undoChangesInModel(opInstance, variant);
+            // Revert the shared Spoon model before serializing: savePatch re-saves the
+            // original variant from the current model, so the change must be undone
+            // first or the computed diff would be empty.
+            op.undoChangesInModel(opInstance, solutionVariant);
+        }
+
+        if (passes) {
+            log.info("CardumenExportEngine: candidate PASSES tests — patch accepted");
+            this.solutions.add(solutionVariant);
+            this.savePatch(solutionVariant);
+            this.outputStatus = AstorOutputStatus.STOP_BY_PATCH_FOUND;
+        } else {
+            log.info("CardumenExportEngine: candidate FAILS tests");
         }
     }
 
