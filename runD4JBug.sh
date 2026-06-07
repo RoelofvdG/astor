@@ -7,12 +7,19 @@
 #
 #   <Project>   Defects4J project id   (e.g. Math, Lang, Chart, Time, ...)
 #   <Version>   Defects4J bug number   (e.g. 70)        -> checks out <Version>b
-#   [engine]    export   (default) CardumenExportEngine + Julia find2fix.jl tool
+#   [engine]    bfs      (default) CardumenExportEngine + Julia find2fix.jl, BFS search
+#               mlfs               CardumenExportEngine + Julia find2fix.jl, MLFS search
+#               export             alias for bfs (kept for backward compatibility)
 #               cardumen           plain Cardumen template-based repair (no Julia)
 #
+# The bfs/mlfs/export engines select the Julia search strategy by exporting
+# FIND2FIX_ITERATOR (read by find2fix.jl, which the engine spawns); the Julia
+# process inherits it from the JVM, so no rebuild of the astor jar is needed.
+#
 # Examples:
-#   ./runD4JBug.sh Math 70
-#   ./runD4JBug.sh Math 70 cardumen
+#   ./runD4JBug.sh Math 70            # CardumenExportEngine, BFS synthesis
+#   ./runD4JBug.sh Math 70 mlfs       # CardumenExportEngine, MLFS synthesis
+#   ./runD4JBug.sh Math 70 cardumen   # plain Cardumen
 #   WORK_ROOT=/tmp/d4j JAVA_LEVEL=7 ./runD4JBug.sh Lang 1
 #
 # Paths (override via environment):
@@ -35,8 +42,9 @@ STOPFIRST=${STOPFIRST:-true}        # -stopfirst: stop this bug once the 1st pat
 
 # --- argument parsing --------------------------------------------------------
 usage() {
-    echo "Usage: $0 <Project> <Version> [export|cardumen]" >&2
-    echo "  e.g. $0 Math 70            (CardumenExportEngine + Julia, default)" >&2
+    echo "Usage: $0 <Project> <Version> [bfs|mlfs|export|cardumen]" >&2
+    echo "  e.g. $0 Math 70            (CardumenExportEngine + Julia BFS, default)" >&2
+    echo "       $0 Math 70 mlfs       (CardumenExportEngine + Julia MLFS)" >&2
     echo "       $0 Math 70 cardumen   (plain Cardumen)" >&2
     exit 2
 }
@@ -44,11 +52,16 @@ usage() {
 [ $# -ge 2 ] || usage
 PROJECT=$1
 VERSION=$2
-ENGINE=${3:-${ENGINE:-export}}
+ENGINE=${3:-${ENGINE:-bfs}}
 
+# ITERATOR is the find2fix.jl search strategy for the export-engine variants;
+# it stays empty for plain cardumen (no Julia tool). 'export' is a bfs alias.
+ITERATOR=""
 case "$ENGINE" in
-    export|cardumen) ;;
-    *) echo "Error: engine must be 'export' or 'cardumen', got '$ENGINE'" >&2; usage ;;
+    bfs|export) ITERATOR=bfs ;;
+    mlfs)       ITERATOR=mlfs ;;
+    cardumen)   ;;
+    *) echo "Error: engine must be 'bfs', 'mlfs', 'export' or 'cardumen', got '$ENGINE'" >&2; usage ;;
 esac
 
 # --- sanity checks -----------------------------------------------------------
@@ -56,7 +69,7 @@ DEFECTS4J="$D4J_BIN/defects4j"
 [ -x "$DEFECTS4J" ] || { echo "Error: defects4j not found/executable at $DEFECTS4J" >&2; exit 1; }
 [ -f "$ASTOR_JAR" ] || { echo "Error: astor jar not found at $ASTOR_JAR" >&2; \
     echo "       build it with: mvn package -DskipTests=true" >&2; exit 1; }
-if [ "$ENGINE" = "export" ] && [ ! -f "$JULIA_TOOL" ]; then
+if [ -n "$ITERATOR" ] && [ ! -f "$JULIA_TOOL" ]; then
     echo "Warning: julia tool not found at $JULIA_TOOL; engine will fall back to constant '0'" >&2
 fi
 export PATH="$D4J_BIN:$PATH"
@@ -98,14 +111,17 @@ LOCATION=$(cd "$WORKDIR" && pwd)
 
 echo ">> src=$SRC_DIR test=$TEST_DIR bin=$BIN_DIR bintest=$BIN_TEST_DIR"
 echo ">> failing=$FAILING"
-echo ">> engine=$ENGINE"
+echo ">> engine=$ENGINE${ITERATOR:+ (julia iterator=$ITERATOR)}"
 
 # --- engine-specific arguments -----------------------------------------------
 JVM_PROPS=()
 MODE_ARGS=()
-if [ "$ENGINE" = "export" ]; then
+if [ -n "$ITERATOR" ]; then
     JVM_PROPS=( -Dcardumen.julia.tool="$JULIA_TOOL" -Dcardumen.julia.project="$JULIA_PROJECT" )
     MODE_ARGS=( -mode custom -customengine fr.inria.astor.approaches.cardumen.CardumenExportEngine )
+    # find2fix.jl reads FIND2FIX_ITERATOR (takes precedence over its CLI default);
+    # the Julia process inherits this from the JVM via ProcessBuilder.
+    export FIND2FIX_ITERATOR="$ITERATOR"
 else
     MODE_ARGS=( -mode cardumen )
 fi
