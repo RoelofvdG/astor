@@ -33,3 +33,5 @@ examples/Math-issue-280/target/
 **/*.txt
 tempdj4/
 output_astor/
+d4j-cardumen-export-results/
+d4j-cardumen-results/
