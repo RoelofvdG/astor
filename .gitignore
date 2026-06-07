@@ -39,3 +39,4 @@ d4j-cardumen-results/
 **/target_type.txt
 **/templates.txt
 **/type_hierarchy.txt
+__pycache__/
