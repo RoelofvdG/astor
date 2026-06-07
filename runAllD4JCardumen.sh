@@ -2,9 +2,11 @@
 #
 # Run Cardumen on every active bug in Defects4J v2.0, in parallel.
 #
-# Two repair engines are selectable via --engine (default: cardumen):
+# The repair engine is selectable via --engine (default: cardumen):
 #   cardumen   plain Cardumen template-based repair
-#   export     CardumenExportEngine (-customengine ...) + Julia find2fix.jl tool
+#   bfs        CardumenExportEngine (-customengine ...) + Julia find2fix.jl, BFS search
+#   mlfs       CardumenExportEngine (-customengine ...) + Julia find2fix.jl, MLFS search
+#   export     alias for bfs (kept for backward compatibility)
 #
 # Each bug gets its own directory under $RESULTS_ROOT containing:
 #   <Project>-<Version>/checkout/      the defects4j working copy
@@ -15,29 +17,31 @@
 #                                       (run is skipped if present; not written for exit 130/Ctrl+C)
 #
 # Usage:
-#   ./runAllD4JCardumen.sh [--engine export|cardumen] [parallelism] [Project ...]
+#   ./runAllD4JCardumen.sh [--engine bfs|mlfs|export|cardumen] [parallelism] [Project ...]
 #
-#   --engine, -e  repair engine: 'cardumen' (default) or 'export'. May also be set
-#                 via the ENGINE env var; the flag wins if both are given.
+#   --engine, -e  repair engine: 'cardumen' (default), 'bfs', 'mlfs', or 'export'.
+#                 May also be set via the ENGINE env var; the flag wins if both given.
 #   parallelism   number of bugs to run concurrently (default 4)
 #   Project ...   optional list of projects to restrict to (default: all 17)
 #
 # Examples:
 #   ./runAllD4JCardumen.sh 8                  # all bugs, 8 at a time, plain cardumen
 #   ./runAllD4JCardumen.sh 4 Math Lang        # only Math and Lang bugs, 4 at a time
-#   ./runAllD4JCardumen.sh --engine export 8  # all bugs via CardumenExportEngine
-#   ./runAllD4JCardumen.sh -e export 4 Math   # export engine on Math, 4 at a time
+#   ./runAllD4JCardumen.sh --engine bfs 8     # all bugs via CardumenExportEngine, BFS
+#   ./runAllD4JCardumen.sh -e mlfs 4 Math     # export engine (MLFS) on Math, 4 at a time
 #   MAXTIME=20 RESULTS_ROOT=/data/d4j ./runAllD4JCardumen.sh 16
 #   FORCE=1 ./runAllD4JCardumen.sh 8 Chart    # re-run even bugs already marked .done
 #
-# The 'export' engine honors the JULIA_TOOL / JULIA_PROJECT env vars (read by
+# The bfs/mlfs/export engines honor the JULIA_TOOL / JULIA_PROJECT env vars (read by
 # runD4JBug.sh, which warns and falls back to constant '0' if the tool is missing).
 #
 # Env overrides (also forwarded to runD4JBug.sh):
 #   ENGINE        repair engine (default cardumen); overridden by --engine/-e
-#   RESULTS_ROOT  where per-bug directories are created
-#                 (default ./d4j-cardumen-results, or ./d4j-cardumen-export-results
-#                  when --engine export is used)
+#   RESULTS_ROOT  where per-bug directories are created. Per-engine default:
+#                   cardumen -> ./d4j-cardumen-results
+#                   bfs      -> ./d4j-cardumen-bfs-results
+#                   mlfs     -> ./d4j-cardumen-mlfs-results
+#                   export   -> ./d4j-cardumen-export-results
 #   MAXTIME       per-bug Astor time budget in minutes (default from runD4JBug.sh: 60)
 #   JAVA_LEVEL    -javacompliancelevel (default 8)
 #   STOPFIRST     stop each bug once the 1st patch is found (default true; set false to keep searching)
@@ -86,10 +90,13 @@ ENGINE=${ENGINE:-cardumen}
 resolve_results_root() {                # default depends on the engine; override wins
     if [ -n "$RESULTS_ROOT_ENV" ]; then
         RESULTS_ROOT=$RESULTS_ROOT_ENV
-    elif [ "$ENGINE" = export ]; then
-        RESULTS_ROOT=./d4j-cardumen-export-results
     else
-        RESULTS_ROOT=./d4j-cardumen-results
+        case "$ENGINE" in
+            bfs)    RESULTS_ROOT=./d4j-cardumen-bfs-results ;;
+            mlfs)   RESULTS_ROOT=./d4j-cardumen-mlfs-results ;;
+            export) RESULTS_ROOT=./d4j-cardumen-export-results ;;
+            *)      RESULTS_ROOT=./d4j-cardumen-results ;;
+        esac
     fi
 }
 resolve_results_root
@@ -149,8 +156,8 @@ while [ $# -gt 0 ]; do
     esac
 done
 case "$ENGINE" in
-    export|cardumen) ;;
-    *) echo "Error: engine must be 'export' or 'cardumen', got '$ENGINE'" >&2; exit 2 ;;
+    bfs|mlfs|export|cardumen) ;;
+    *) echo "Error: engine must be 'bfs', 'mlfs', 'export' or 'cardumen', got '$ENGINE'" >&2; exit 2 ;;
 esac
 resolve_results_root   # re-resolve in case --engine changed the engine
 
