@@ -1321,4 +1321,49 @@ public class CardumenApproachTest extends BaseEvolutionaryTest {
 
 	}
 
+	@Test
+	public void testCardumentOddEven() throws Exception {
+
+		String dep = new File("./examples/libs/junit-4.4.jar").getAbsolutePath();
+		File out = new File(ConfigurationProperties.getProperty("workingDirectory"));
+		int generations = 500;
+
+		String[] args = new String[] { "-dependencies", dep, "-failing",
+				"JUnitOddEvenTest", "-location",
+				new File("./examples/oddBugCardumen").getAbsolutePath()
+				, "-srcjavafolder",
+				"/src/main/java/", "-srctestfolder", "/src/test/java", "-binjavafolder", "/target/classes", "-bintestfolder",
+				"/target/test-classes",
+				"-javacompliancelevel", "8",
+				"-flthreshold", "0.5", "-out",
+				out.getAbsolutePath(), "-scope", "local", "-seed", "10", "-maxgen", Integer.toString(generations),
+				"-stopfirst", "true", "-maxtime", "100",
+
+		};
+		CommandSummary command = new CommandSummary(args);
+
+		command.command.put("-mode", ExecutionMode.CARDUMEN.name());
+		command.command.put("-flthreshold", "0.01");
+		command.command.put("-maxtime", "60");
+		command.command.put("-seed", "1");
+		command.command.put("-maxgen", "1000");
+		command.command.put("-population", "1");
+		command.command.put("-saveall", "true");
+
+		command.command.put("-modificationpointnavigation", "sequence");
+
+		AstorMain main1 = new AstorMain();
+		main1.execute(command.flat());
+
+		CardumenApproach cardumen = (CardumenApproach) main1.getEngine();
+
+		assertTrue(cardumen.getSolutions().size() > 0);
+
+		// Now test with another navigation strategy
+		command.command.put("-modificationpointnavigation", "weight");
+		main1.execute(command.flat());
+		cardumen = (CardumenApproach) main1.getEngine();
+		assertTrue(cardumen.getSolutions().size() > 0);
+	}
+
 }

@@ -39,7 +39,7 @@ public class ExpressionReplaceOperator extends ReplaceOp {
 		}
 
 		// I save the original instance
-		opInstance.setOriginal(elementOriginalCloned);
+		opInstance.setOriginal(elementToModify);
 		// Finally, we update the modification point (i.e., Astor
 		// Representation)
 		opInstance.getModificationPoint().setCodeElement(elFixIngredient);
