@@ -26,19 +26,23 @@ from pathlib import Path
 
 
 def bfs_patch_found(bfs_dir, project, bug_id):
-    """Return True if the ExportEngine run for this bug found a patch.
+    """Return whether the ExportEngine run for this bug found a patch.
 
     The export engine writes an ``astor_output.json`` whose
     ``general.OUTPUT_STATUS`` is ``STOP_BY_PATCH_FOUND`` when a plausible
     patch was synthesised. The patch list itself is not serialised, so the
     status field is the reliable signal.
+
+    Returns ``None`` if the bug was not run at all (no output directory),
+    so callers can distinguish "not run" from "run, no patch found".
     """
     if bfs_dir is None:
-        return False
+        return None
     name = f"{project}-{bug_id}"
-    json_path = (
-        Path(bfs_dir) / name / "astor-output" / f"AstorMain-{name}" / "astor_output.json"
-    )
+    run_dir = Path(bfs_dir) / name
+    if not run_dir.is_dir():
+        return None
+    json_path = run_dir / "astor-output" / f"AstorMain-{name}" / "astor_output.json"
     if not json_path.is_file():
         return False
     try:
@@ -134,7 +138,10 @@ def build_tabular(groups):
         proj_cell = r"\multirow{" + str(count) + r"}{*}{\centering " + project + r"}"
         for i, (_, bug_id, has_patch, has_bfs) in enumerate(items):
             mark = r"\Checkmark" if has_patch else r"\XSolidBrush"
-            bfs_mark = r"\Checkmark" if has_bfs else r"\XSolidBrush"
+            if has_bfs is None:
+                bfs_mark = ""
+            else:
+                bfs_mark = r"\Checkmark" if has_bfs else r"\XSolidBrush"
             cell = proj_cell if i == 0 else ""
             lines.append(f"      {cell} & {bug_id} & {mark} & {bfs_mark} & \\\\")
 
@@ -205,7 +212,12 @@ def main():
     parser = argparse.ArgumentParser(
         description="Generate LaTeX results table from d4j-cardumen-results."
     )
-    parser.add_argument("results_dir", help="Path to the results directory")
+    parser.add_argument(
+        "results_dir",
+        nargs="?",
+        default="d4j-cardumen-results",
+        help="Path to the results directory (default: d4j-cardumen-results)",
+    )
     parser.add_argument("output", nargs="?", help="Output .tex file (default: stdout)")
     parser.add_argument("--copy", action="store_true", help="Copy the table to the clipboard")
     parser.add_argument("--all", action="store_true", help="Include bugs without a patch (default: patches only)")
