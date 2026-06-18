@@ -1,6 +1,9 @@
 package fr.inria.astor.approaches.cardumen;
 
+import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.martiansoftware.jsap.JSAPException;
 
@@ -13,6 +16,8 @@ import fr.inria.astor.core.setup.ProjectRepairFacade;
 import fr.inria.astor.core.solutionsearch.spaces.ingredients.scopes.ExpressionClassTypeIngredientSpace;
 import fr.inria.astor.core.solutionsearch.spaces.ingredients.scopes.ExpressionTypeIngredientSpace;
 import fr.inria.astor.core.solutionsearch.spaces.ingredients.scopes.IngredientPoolScope;
+import fr.inria.astor.core.stats.PatchStat;
+import fr.inria.astor.core.stats.PatchStat.PatchStatEnum;
 import fr.inria.astor.core.stats.Stats;
 import fr.inria.astor.core.stats.Stats.GeneralStatEnum;
 import fr.inria.main.ExecutionResult;
@@ -59,15 +64,51 @@ public class CardumenApproach extends JGenProg {
 		this.setIngredientPool(ingredientspace);
 	}
 
+	/** Candidate number (1-based, in tested order) at which each solution variant was found, by variant id. */
+	private final Map<Integer, Integer> candidateNumberByVariantId = new HashMap<>();
+
 	/**
 	 * Counts every candidate that reaches compile/validation, accumulated across all
 	 * modification points. This is the single choke point through which both the normal
 	 * Cardumen evolutionary loop and {@link CardumenExportEngine} test a candidate.
+	 * <p>
+	 * When the candidate turns out to be a patch, records which candidate number it was
+	 * and logs it together with the elapsed time since the search started.
 	 */
 	@Override
 	public boolean processCreatedVariant(ProgramVariant programVariant, int generation) throws Exception {
 		Stats.currentStat.increment(GeneralStatEnum.NR_TESTED_CANDIDATES);
-		return super.processCreatedVariant(programVariant, generation);
+		boolean found = super.processCreatedVariant(programVariant, generation);
+		if (found) {
+			int candidateNumber = testedCandidateCount();
+			double elapsed = (System.currentTimeMillis() - dateInitEvolution.getTime()) / 1000d;
+			candidateNumberByVariantId.put(programVariant.getId(), candidateNumber);
+			log.info("Cardumen: patch found at candidate #" + candidateNumber + " after " + elapsed
+					+ "s (variant " + programVariant.getId() + ")");
+		}
+		return found;
+	}
+
+	/** Current value of the tested-candidates counter (0 if not yet initialised). */
+	private int testedCandidateCount() {
+		Object c = Stats.currentStat.getGeneralStats().get(GeneralStatEnum.NR_TESTED_CANDIDATES);
+		return (c instanceof Stats.Counter) ? ((Stats.Counter) c).getCounter() : 0;
+	}
+
+	/**
+	 * Attaches the candidate number to each found patch's stats. The elapsed
+	 * timestamp is already recorded by the superclass as {@link PatchStatEnum#TIME}.
+	 */
+	@Override
+	public List<PatchStat> createStatsForPatches(List<ProgramVariant> variants, int generation, Date dateInitEvolution) {
+		List<PatchStat> patches = super.createStatsForPatches(variants, generation, dateInitEvolution);
+		for (ProgramVariant v : variants) {
+			Integer num = candidateNumberByVariantId.get(v.getId());
+			if (num != null && v.getPatchInfo() != null) {
+				v.getPatchInfo().addStat(PatchStatEnum.CANDIDATE_NUMBER, num);
+			}
+		}
+		return patches;
 	}
 
 	/**
