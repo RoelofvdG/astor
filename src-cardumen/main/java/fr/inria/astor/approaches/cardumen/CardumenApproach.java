@@ -5,6 +5,7 @@ import java.util.List;
 import com.martiansoftware.jsap.JSAPException;
 
 import fr.inria.astor.approaches.jgenprog.JGenProg;
+import fr.inria.astor.core.entities.ProgramVariant;
 import fr.inria.astor.core.manipulation.MutationSupporter;
 import fr.inria.astor.core.manipulation.filters.TargetElementProcessor;
 import fr.inria.astor.core.setup.ConfigurationProperties;
@@ -12,6 +13,9 @@ import fr.inria.astor.core.setup.ProjectRepairFacade;
 import fr.inria.astor.core.solutionsearch.spaces.ingredients.scopes.ExpressionClassTypeIngredientSpace;
 import fr.inria.astor.core.solutionsearch.spaces.ingredients.scopes.ExpressionTypeIngredientSpace;
 import fr.inria.astor.core.solutionsearch.spaces.ingredients.scopes.IngredientPoolScope;
+import fr.inria.astor.core.stats.Stats;
+import fr.inria.astor.core.stats.Stats.GeneralStatEnum;
+import fr.inria.main.ExecutionResult;
 import fr.inria.main.evolution.ExtensionPoints;
 
 /**
@@ -53,6 +57,32 @@ public class CardumenApproach extends JGenProg {
 			ingredientspace.scope = IngredientPoolScope.valueOf(scope.toUpperCase());
 		}
 		this.setIngredientPool(ingredientspace);
+	}
+
+	/**
+	 * Counts every candidate that reaches compile/validation, accumulated across all
+	 * modification points. This is the single choke point through which both the normal
+	 * Cardumen evolutionary loop and {@link CardumenExportEngine} test a candidate.
+	 */
+	@Override
+	public boolean processCreatedVariant(ProgramVariant programVariant, int generation) throws Exception {
+		Stats.currentStat.increment(GeneralStatEnum.NR_TESTED_CANDIDATES);
+		return super.processCreatedVariant(programVariant, generation);
+	}
+
+	/**
+	 * Surfaces the two Cardumen performance measurements at the end of a run: the total
+	 * number of candidates tested and the total runtime. Both are also present in the
+	 * standard stats output ({@code NR_TESTED_CANDIDATES} and {@code TOTAL_TIME}).
+	 */
+	@Override
+	public ExecutionResult atEnd() {
+		ExecutionResult result = super.atEnd();
+		Object tested = Stats.currentStat.getGeneralStats().get(GeneralStatEnum.NR_TESTED_CANDIDATES);
+		Object time = Stats.currentStat.getGeneralStats().get(GeneralStatEnum.TOTAL_TIME);
+		log.info("Cardumen: total candidates tested = " + (tested != null ? tested : 0));
+		log.info("Cardumen: total runtime (s) = " + time);
+		return result;
 	}
 
 }

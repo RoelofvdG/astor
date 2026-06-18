@@ -85,6 +85,10 @@ public class CardumenExportEngine extends CardumenApproach {
 
     @Override
     public void startSearch() throws Exception {
+        // Reset the run start time so the reported runtime measures the search loop,
+        // matching EvolutionarySearchEngine.startSearch() in the normal Cardumen mode.
+        this.dateInitEvolution = new java.util.Date();
+
         // templates.txt is already written by ExpressionTypeIngredientSpace.defineSpace()
         // which runs during loadExtensionPoints() before this method is called.
 
