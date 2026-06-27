@@ -55,6 +55,10 @@
 #   ACCOUNT        SLURM --account             (default education-eemcs-msc-cs)
 #   CPUS           SLURM --cpus-per-task       (default 6)
 #   MEM_PER_CPU    SLURM --mem-per-cpu         (default 2G)
+#   EXTRA_MODULES  extra `module load` names   (default: none)
+#   SVN_DIR        dir with the svn binary, prepended to PATH (default:
+#                  /home/rrlvandergeest/svn/subversion-1.14.5/subversion/svn).
+#                  REQUIRED for the SVN-backed Chart project; set "" if svn is on PATH.
 
 set -euo pipefail
 
@@ -78,6 +82,12 @@ PARTITION=${PARTITION:-compute}
 ACCOUNT=${ACCOUNT:-education-eemcs-msc-cs}
 CPUS=${CPUS:-6}
 MEM_PER_CPU=${MEM_PER_CPU:-2G}
+# Extra modules loaded by every job, beyond "2025" (and "julia" for bfs/mlfs).
+EXTRA_MODULES=${EXTRA_MODULES:-}
+# Directory holding the `svn` binary, prepended to PATH in every job. REQUIRED:
+# the Chart project is SVN-backed in Defects4J, so `defects4j checkout` shells out
+# to `svn`, which is not on a bare compute node. Set to "" if svn is already on PATH.
+SVN_DIR=${SVN_DIR:-/home/rrlvandergeest/svn/subversion-1.14.5/subversion/svn}
 
 RUN_ONE="$ASTOR_ROOT/runD4JBug.sh"
 DEFECTS4J="$D4J_BIN/defects4j"
@@ -137,6 +147,10 @@ SUBMIT_ALL="$JOBS_DIR/submit_all.sh"
     echo "cd \"\$(dirname \"\${BASH_SOURCE[0]}\")\""
 } > "$SUBMIT_ALL"
 
+# Line that puts svn on PATH inside each job (literal $PATH preserved for the job).
+svn_path_line=""
+[ -n "$SVN_DIR" ] && svn_path_line="export PATH=\"$SVN_DIR:\$PATH\"   # svn for SVN-backed projects (Chart)"
+
 job_count=0
 for mode in $MODES; do
     results_root=$(results_dir_for "$mode")
@@ -144,9 +158,11 @@ for mode in $MODES; do
     log_dir="$JOBS_DIR/logs/$mode"
     mkdir -p "$mode_dir" "$log_dir"
 
-    # Julia is only needed for the export-engine modes.
-    julia_module=""
-    [ "$mode" != "cardumen" ] && julia_module=$'module load julia\n'
+    # Assemble the `module load` block: 2025 stack, any EXTRA_MODULES, and
+    # julia for the export modes (svn is added to PATH separately, see SVN_DIR).
+    module_block="module load 2025"
+    for em in $EXTRA_MODULES; do module_block+=$'\n'"module load $em"; done
+    [ "$mode" != "cardumen" ] && module_block+=$'\nmodule load julia'
 
     for p in "${PROJECTS[@]}"; do
         while read -r b; do
@@ -166,8 +182,9 @@ for mode in $MODES; do
 #SBATCH --job-name="${mode}-${id}"
 #SBATCH --output=$log_dir/${id}-%j.out
 
-module load 2025
-${julia_module}
+${module_block}
+${svn_path_line}
+
 set -uo pipefail
 
 # Repair this single Defects4J bug with one engine. Paths are baked in at
