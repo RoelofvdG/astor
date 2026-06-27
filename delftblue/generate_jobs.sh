@@ -169,6 +169,7 @@ for mode in $MODES; do
 module load 2025
 module load subversion
 module load julia
+module load git
 
 set -uo pipefail
 
