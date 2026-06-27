@@ -6,8 +6,11 @@ Usage:
     python generate_results_table.py <results-dir> [output.tex]
 
 For each <Project>-<ID> directory found in <results-dir>, emits a table row
-with the project name, bug id, and whether a diffSolutions folder was found
-for Cardumen (in <results-dir>), BFS (in --bfs-dir), and MLFS (in --mlfs-dir).
+with the project name, bug id, and, for Cardumen (in <results-dir>), BFS (in
+--bfs-dir), and MLFS (in --mlfs-dir), whether that run completed (has a
+.done/.error marker) and produced a diffSolutions folder. A column is left
+blank when the run did not complete (no marker), so an empty cell means
+"not run" rather than "ran, found no patch".
 
 Required LaTeX packages (add to preamble):
     \\usepackage{booktabs}   % toprule/midrule/bottomrule/cmidrule
@@ -24,20 +27,28 @@ from pathlib import Path
 
 
 def patch_found(base_dir, project, bug_id):
-    """Return whether the run for this bug produced a plausible patch.
+    """Return whether the bug's run produced a plausible patch.
 
-    A patch is signalled by the presence of an ``astor-output/diffSolutions``
-    directory, the same way Cardumen results are detected.
+    A patch is signalled by an ``astor-output/diffSolutions`` directory,
+    independent of the run's exit status: with stop-on-first-patch disabled a
+    run may synthesise a patch and still crash afterwards.
 
-    Returns ``None`` if the bug was not run at all (no output directory),
-    so callers can distinguish "not run" from "run, no patch found".
+    When no ``diffSolutions`` is present, the ``.done``/``.error`` completion
+    marker decides between "ran, found no patch" (``False``) and "not run"
+    (``None``): a per-bug directory that is missing, or that exists but carries
+    no marker (an in-progress, killed, or interrupted run), returns ``None`` so
+    callers can distinguish it from a completed run that found nothing.
     """
     if base_dir is None:
         return None
     run_dir = Path(base_dir) / f"{project}-{bug_id}"
+    if (run_dir / "astor-output" / "diffSolutions").is_dir():
+        return True
     if not run_dir.is_dir():
         return None
-    return (run_dir / "astor-output" / "diffSolutions").is_dir()
+    if (run_dir / ".done").is_file() or (run_dir / ".error").is_file():
+        return False
+    return None
 
 
 def find_bugs(results_dir, bfs_dir=None, mlfs_dir=None):
@@ -56,7 +67,7 @@ def find_bugs(results_dir, bfs_dir=None, mlfs_dir=None):
             continue
         project = m.group(1)
         bug_id = int(m.group(2))
-        has_patch = (entry / "astor-output" / "diffSolutions").is_dir()
+        has_patch = patch_found(results_dir, project, bug_id)
         has_bfs = patch_found(bfs_dir, project, bug_id)
         has_mlfs = patch_found(mlfs_dir, project, bug_id)
         bugs.append((project, bug_id, has_patch, has_bfs, has_mlfs))
@@ -133,7 +144,7 @@ def build_tabular(groups):
         count = len(items)
         proj_cell = r"\multirow{" + str(count) + r"}{*}{\centering " + project + r"}"
         for i, (_, bug_id, has_patch, has_bfs, has_mlfs) in enumerate(items):
-            mark = r"\Checkmark" if has_patch else r"\XSolidBrush"
+            mark = optional_mark(has_patch)
             bfs_mark = optional_mark(has_bfs)
             mlfs_mark = optional_mark(has_mlfs)
             cell = proj_cell if i == 0 else ""
