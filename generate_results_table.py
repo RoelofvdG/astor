@@ -6,9 +6,8 @@ Usage:
     python generate_results_table.py <results-dir> [output.tex]
 
 For each <Project>-<ID> directory found in <results-dir>, emits a table row
-with the project name, bug id, whether a diffSolutions folder was found
-(Cardumen), whether the matching ExportEngine run found a patch (BFS, read
-from --bfs-dir), and one empty column (MLFS) for manual completion.
+with the project name, bug id, and whether a diffSolutions folder was found
+for Cardumen (in <results-dir>), BFS (in --bfs-dir), and MLFS (in --mlfs-dir).
 
 Required LaTeX packages (add to preamble):
     \\usepackage{booktabs}   % toprule/midrule/bottomrule/cmidrule
@@ -17,7 +16,6 @@ Required LaTeX packages (add to preamble):
 """
 
 import argparse
-import json
 import re
 import subprocess
 import sys
@@ -25,34 +23,24 @@ from itertools import groupby
 from pathlib import Path
 
 
-def bfs_patch_found(bfs_dir, project, bug_id):
-    """Return whether the ExportEngine run for this bug found a patch.
+def patch_found(base_dir, project, bug_id):
+    """Return whether the run for this bug produced a plausible patch.
 
-    The export engine writes an ``astor_output.json`` whose
-    ``general.OUTPUT_STATUS`` is ``STOP_BY_PATCH_FOUND`` when a plausible
-    patch was synthesised. The patch list itself is not serialised, so the
-    status field is the reliable signal.
+    A patch is signalled by the presence of an ``astor-output/diffSolutions``
+    directory, the same way Cardumen results are detected.
 
     Returns ``None`` if the bug was not run at all (no output directory),
     so callers can distinguish "not run" from "run, no patch found".
     """
-    if bfs_dir is None:
+    if base_dir is None:
         return None
-    name = f"{project}-{bug_id}"
-    run_dir = Path(bfs_dir) / name
+    run_dir = Path(base_dir) / f"{project}-{bug_id}"
     if not run_dir.is_dir():
         return None
-    json_path = run_dir / "astor-output" / f"AstorMain-{name}" / "astor_output.json"
-    if not json_path.is_file():
-        return False
-    try:
-        data = json.loads(json_path.read_text())
-    except (ValueError, OSError):
-        return False
-    return data.get("general", {}).get("OUTPUT_STATUS") == "STOP_BY_PATCH_FOUND"
+    return (run_dir / "astor-output" / "diffSolutions").is_dir()
 
 
-def find_bugs(results_dir, bfs_dir=None):
+def find_bugs(results_dir, bfs_dir=None, mlfs_dir=None):
     pattern = re.compile(r'^([A-Za-z][A-Za-z0-9]*)-(\d+)$')
     results_path = Path(results_dir)
     if not results_path.is_dir():
@@ -69,15 +57,16 @@ def find_bugs(results_dir, bfs_dir=None):
         project = m.group(1)
         bug_id = int(m.group(2))
         has_patch = (entry / "astor-output" / "diffSolutions").is_dir()
-        has_bfs = bfs_patch_found(bfs_dir, project, bug_id)
-        bugs.append((project, bug_id, has_patch, has_bfs))
+        has_bfs = patch_found(bfs_dir, project, bug_id)
+        has_mlfs = patch_found(mlfs_dir, project, bug_id)
+        bugs.append((project, bug_id, has_patch, has_bfs, has_mlfs))
 
     bugs.sort(key=lambda x: (x[0], x[1]))
     return bugs
 
 
 def group_bugs(bugs):
-    """Return list of (project, [(project, bug_id, has_patch), ...]) pairs."""
+    """Return list of (project, [(project, bug_id, has_patch, has_bfs, has_mlfs), ...]) pairs."""
     return [(proj, list(items)) for proj, items in groupby(bugs, key=lambda x: x[0])]
 
 
@@ -119,6 +108,13 @@ def split_groups(groups, n=3):
     return parts
 
 
+def optional_mark(has_patch):
+    """Render a check/cross, or an empty cell when the bug was not run."""
+    if has_patch is None:
+        return ""
+    return r"\Checkmark" if has_patch else r"\XSolidBrush"
+
+
 def build_tabular(groups):
     lines = []
     max_len = max((len(proj) for proj, _ in groups), default=5)
@@ -136,14 +132,12 @@ def build_tabular(groups):
             lines.append(r"      \cmidrule{2-5}")
         count = len(items)
         proj_cell = r"\multirow{" + str(count) + r"}{*}{\centering " + project + r"}"
-        for i, (_, bug_id, has_patch, has_bfs) in enumerate(items):
+        for i, (_, bug_id, has_patch, has_bfs, has_mlfs) in enumerate(items):
             mark = r"\Checkmark" if has_patch else r"\XSolidBrush"
-            if has_bfs is None:
-                bfs_mark = ""
-            else:
-                bfs_mark = r"\Checkmark" if has_bfs else r"\XSolidBrush"
+            bfs_mark = optional_mark(has_bfs)
+            mlfs_mark = optional_mark(has_mlfs)
             cell = proj_cell if i == 0 else ""
-            lines.append(f"      {cell} & {bug_id} & {mark} & {bfs_mark} & \\\\")
+            lines.append(f"      {cell} & {bug_id} & {mark} & {bfs_mark} & {mlfs_mark} \\\\")
 
     lines.append(r"      \bottomrule")
     lines.append(r"    \end{tabular}")
@@ -153,7 +147,7 @@ def build_tabular(groups):
 
 def generate_table(bugs, patches_only=True):
     if patches_only:
-        bugs = [b for b in bugs if b[2] or b[3]]
+        bugs = [b for b in bugs if b[2] or b[3] or b[4]]
     groups = group_bugs(bugs)
     parts = split_groups(groups, n=2)
 
@@ -223,12 +217,17 @@ def main():
     parser.add_argument("--all", action="store_true", help="Include bugs without a patch (default: patches only)")
     parser.add_argument(
         "--bfs-dir",
-        default="d4j-cardumen-export-results",
-        help="Path to the ExportEngine (BFS) results directory (default: d4j-cardumen-export-results)",
+        default="d4j-cardumen-bfs-results",
+        help="Path to the BFS results directory (default: d4j-cardumen-bfs-results)",
+    )
+    parser.add_argument(
+        "--mlfs-dir",
+        default="d4j-cardumen-mlfs-results",
+        help="Path to the MLFS results directory (default: d4j-cardumen-mlfs-results)",
     )
     args = parser.parse_args()
 
-    bugs = find_bugs(args.results_dir, args.bfs_dir)
+    bugs = find_bugs(args.results_dir, args.bfs_dir, args.mlfs_dir)
     if not bugs:
         print("Warning: no <Project>-<ID> directories found.", file=sys.stderr)
 
