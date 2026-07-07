@@ -3,7 +3,7 @@
 Generate a LaTeX table from d4j-cardumen-results.
 
 Usage:
-    python generate_results_table.py <results-dir> [output.tex]
+    python generate_results_table.py <results-dir> [output.tex] [--whitelist FILE]
 
 For each <Project>-<ID> directory found in <results-dir>, emits a table row
 with the project name, bug id, and, for Cardumen (in <results-dir>), BFS (in
@@ -51,7 +51,22 @@ def patch_found(base_dir, project, bug_id):
     return None
 
 
-def find_bugs(results_dir, bfs_dir=None, mlfs_dir=None):
+def load_whitelist(path):
+    """Read a whitelist file into a set of ``(project, id)`` tuples.
+
+    Each non-empty, non-comment line is ``<Project> <ID>`` (whitespace-separated).
+    """
+    whitelist = set()
+    for line in Path(path).read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        project, bug_id = line.split()
+        whitelist.add((project, int(bug_id)))
+    return whitelist
+
+
+def find_bugs(results_dir, bfs_dir=None, mlfs_dir=None, whitelist=None):
     pattern = re.compile(r'^([A-Za-z][A-Za-z0-9]*)-(\d+)$')
     results_path = Path(results_dir)
     if not results_path.is_dir():
@@ -67,6 +82,8 @@ def find_bugs(results_dir, bfs_dir=None, mlfs_dir=None):
             continue
         project = m.group(1)
         bug_id = int(m.group(2))
+        if whitelist is not None and (project, bug_id) not in whitelist:
+            continue
         has_patch = patch_found(results_dir, project, bug_id)
         has_bfs = patch_found(bfs_dir, project, bug_id)
         has_mlfs = patch_found(mlfs_dir, project, bug_id)
@@ -236,9 +253,15 @@ def main():
         default="d4j-cardumen-mlfs-results",
         help="Path to the MLFS results directory (default: d4j-cardumen-mlfs-results)",
     )
+    parser.add_argument(
+        "--whitelist",
+        help="Path to a whitelist file (one '<Project> <ID>' per line); "
+             "only listed bugs are included",
+    )
     args = parser.parse_args()
 
-    bugs = find_bugs(args.results_dir, args.bfs_dir, args.mlfs_dir)
+    whitelist = load_whitelist(args.whitelist) if args.whitelist else None
+    bugs = find_bugs(args.results_dir, args.bfs_dir, args.mlfs_dir, whitelist)
     if not bugs:
         print("Warning: no <Project>-<ID> directories found.", file=sys.stderr)
 
