@@ -1,21 +1,27 @@
 """
-Generate a LaTeX pgfplots bar chart of time-to-patch from d4j-cardumen-results.
+Generate a LaTeX pgfplots chart of time-to-patch from d4j-cardumen-results.
 
 Usage:
-    python generate_time_chart.py <results-dir> [output.tex] [--whitelist FILE]
+    python generate_time_chart.py <results-dir> [output.tex] [--plot {box,bar}] [--whitelist FILE]
 
 For each <Project>-<ID> directory found in <results-dir> that produced a
 plausible patch (astor-output/diffSolutions), reads the time (in seconds)
 until that patch was found from astor_output.json. Bugs are grouped by
 project, and for Cardumen (in <results-dir>), BFS (in --bfs-dir), and MLFS
-(in --mlfs-dir) the median time-to-patch across that project's solved bugs is
-plotted as one bar per approach per project. A project/approach combination
-with no solved bugs has no bar (rather than a zero-height bar), and a project
-with no solved bugs in any approach is left off the chart entirely.
+(in --mlfs-dir) the distribution of time-to-patch across that project's
+solved bugs is plotted per approach per project.
+
+--plot box (default) draws a box plot: median, IQR box, 1.5x IQR whiskers,
+and outliers as points, computed by pgfplots from the raw per-bug times.
+--plot bar draws a bar chart of the median time-to-patch instead.
+Either way, a project/approach combination with no solved bugs is omitted
+(no box/bar), and a project with no solved bugs in any approach is left off
+the chart entirely.
 
 Required LaTeX packages (add to preamble):
     \\usepackage{pgfplots}
     \\pgfplotsset{compat=1.17}
+    \\usepgfplotslibrary{statistics}   % only needed for --plot box
 """
 
 import argparse
@@ -31,6 +37,8 @@ from generate_results_table import copy_to_clipboard, load_whitelist, patch_foun
 BUG_DIR_RE = re.compile(r'^([A-Za-z][A-Za-z0-9]*)-(\d+)$')
 
 APPROACHES = ["Cardumen", "BFS", "MLFS"]
+BOX_COLORS = ["blue!60", "red!60", "green!60!black"]
+BOX_OFFSETS = [-0.24, 0, 0.24]
 
 
 def bug_time(base_dir, project, bug_id):
@@ -78,33 +86,28 @@ def collect_bug_times(results_dir, bfs_dir=None, mlfs_dir=None, whitelist=None):
     return entries
 
 
-def median_by_project(entries):
-    """Return [(project, [med_cardumen, med_bfs, med_mlfs]), ...].
+def times_by_project(entries):
+    """Return [(project, [times_cardumen, times_bfs, times_mlfs]), ...].
 
-    A column is None when no bug in that project found a patch with that
-    approach. Projects with no data in any approach are dropped."""
-    medians = []
+    Each column is the (possibly empty) list of raw per-bug times for bugs in
+    that project solved by that approach. Projects with no data in any
+    approach are dropped.
+    """
+    grouped = []
     for project, items in groupby(entries, key=lambda x: x[0]):
         items = list(items)
         columns = []
         for col in range(2, 5):
-            times = [item[col] for item in items if item[col] is not None]
-            columns.append(statistics.median(times) if times else None)
-        if any(c is not None for c in columns):
-            medians.append((project, columns))
-    return medians
+            columns.append([item[col] for item in items if item[col] is not None])
+        if any(columns):
+            grouped.append((project, columns))
+    return grouped
 
 
-def build_pgfplot(medians):
-    projects = [project for project, _ in medians]
-
+def _axis_preamble(projects, extra_options):
     lines = []
-    lines.append(r"\begin{figure}[ht]")
-    lines.append(r"  \centering")
     lines.append(r"  \begin{tikzpicture}")
     lines.append(r"  \begin{axis}[")
-    lines.append(r"      ybar,")
-    lines.append(r"      bar width=6pt,")
     lines.append(r"      width=\textwidth,")
     lines.append(r"      height=0.45\textwidth,")
     lines.append(r"      ymode=log,")
@@ -112,21 +115,33 @@ def build_pgfplot(medians):
     lines.append(r"      ylabel={Time to patch (s)},")
     lines.append(r"      xlabel={Project},")
     lines.append(r"      xlabel style={at={(0.5,-0.25)}},")
-    lines.append(r"      symbolic x coords={" + ",".join(projects) + r"},")
-    lines.append(r"      xtick=data,")
+    lines.extend(extra_options)
     lines.append(r"      x tick label style={rotate=45, anchor=east},")
-    lines.append(r"      enlarge x limits=0.04,")
     lines.append(r"      ymajorgrids,")
     lines.append(r"      major grid style={dotted,gray},")
     lines.append(r"      legend style={at={(0.5,-0.5)}, anchor=north, legend columns=-1},")
     lines.append(r"      legend cell align=left,")
     lines.append(r"  ]")
+    return lines
+
+
+def build_bar_chart(grouped):
+    projects = [project for project, _ in grouped]
+
+    lines = [r"\begin{figure}[ht]", r"  \centering"]
+    lines += _axis_preamble(projects, [
+        r"      ybar,",
+        r"      bar width=6pt,",
+        r"      symbolic x coords={" + ",".join(projects) + r"},",
+        r"      xtick=data,",
+        r"      enlarge x limits=0.04,",
+    ])
 
     for col in range(3):
         coords = " ".join(
-            f"({project},{value:g})"
-            for project, columns in medians
-            if (value := columns[col]) is not None
+            f"({project},{statistics.median(values):g})"
+            for project, columns in grouped
+            if (values := columns[col])
         )
         lines.append(r"  \addplot+[fill] coordinates {")
         lines.append(f"      {coords}")
@@ -145,9 +160,66 @@ def build_pgfplot(medians):
     return "\n".join(lines)
 
 
+def build_box_plot(grouped):
+    projects = [project for project, _ in grouped]
+    n = len(projects)
+
+    lines = [r"\begin{figure}[ht]", r"  \centering"]
+    lines += _axis_preamble(projects, [
+        r"      boxplot/draw direction=y,",
+        r"      boxplot/box extend=0.2,",
+        r"      xtick={" + ",".join(str(i + 1) for i in range(n)) + r"},",
+        r"      xticklabels={" + ",".join(projects) + r"},",
+        r"      xtick style={draw=none},",
+        r"      xmin=0.5,",
+        f"      xmax={n + 0.5},",
+    ])
+
+    has_data = [False, False, False]
+    for i, (project, columns) in enumerate(grouped, start=1):
+        for col in range(3):
+            values = columns[col]
+            if not values:
+                continue
+            has_data[col] = True
+            position = i + BOX_OFFSETS[col]
+            options = f"boxplot, fill={BOX_COLORS[col]}, draw=black, forget plot"
+            lines.append(
+                r"  \addplot+[" + options + r", boxplot/draw position="
+                + f"{position:g}" + r"] table[y index=0] {"
+            )
+            lines.append(r"      y")
+            for v in values:
+                lines.append(f"      {v:g}")
+            lines.append(r"  };")
+
+    # Boxplot's own legend glyph is a mini box-and-whisker icon; add plain
+    # color-swatch legend entries instead, decoupled from the actual plots.
+    for col in range(3):
+        if not has_data[col]:
+            continue
+        lines.append(
+            r"  \addlegendimage{area legend, fill=" + BOX_COLORS[col] + r", draw=black}"
+        )
+        lines.append(r"  \addlegendentry{" + APPROACHES[col] + r"}")
+
+    lines.append(r"  \end{axis}")
+    lines.append(r"  \end{tikzpicture}")
+    lines.append(
+        r"  \caption{Time to patch discovery per project, by approach"
+        r" (log scale). Boxes show the interquartile range and median;"
+        r" whiskers extend to $1.5\times$ IQR, with individual points beyond"
+        r" that shown as outliers. A box is omitted where an approach found"
+        r" no patch for that project.}"
+    )
+    lines.append(r"  \label{fig:time-to-patch}")
+    lines.append(r"\end{figure}")
+    return "\n".join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate a LaTeX pgfplots bar chart of time-to-patch from d4j-cardumen-results."
+        description="Generate a LaTeX pgfplots chart of time-to-patch from d4j-cardumen-results."
     )
     parser.add_argument(
         "results_dir",
@@ -156,6 +228,13 @@ def main():
         help="Path to the results directory (default: d4j-cardumen-results)",
     )
     parser.add_argument("output", nargs="?", help="Output .tex file (default: stdout)")
+    parser.add_argument(
+        "--plot",
+        choices=["box", "bar"],
+        default="box",
+        help="Chart type: box plot of the full distribution, or bar chart of "
+             "the median (default: box)",
+    )
     parser.add_argument("--copy", action="store_true", help="Copy the chart to the clipboard")
     parser.add_argument(
         "--bfs-dir",
@@ -179,11 +258,11 @@ def main():
     if not entries:
         print("Warning: no <Project>-<ID> directories found.", file=sys.stderr)
 
-    medians = median_by_project(entries)
-    if not medians:
+    grouped = times_by_project(entries)
+    if not grouped:
         print("Warning: no bugs with a found patch; chart will be empty.", file=sys.stderr)
 
-    chart = build_pgfplot(medians)
+    chart = build_box_plot(grouped) if args.plot == "box" else build_bar_chart(grouped)
 
     if args.output:
         Path(args.output).write_text(chart + "\n")
