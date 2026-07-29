@@ -104,9 +104,19 @@ public class CardumenExportEngine extends CardumenApproach {
         String projectDir = projectFacade.getProperties().getOriginalProjectRootDir();
         String toolPath = System.getProperty("cardumen.julia.tool");
         int maxIters = Math.min(points.size(), ConfigurationProperties.getPropertyInt("maxGeneration"));
+        int maxMinutes = ConfigurationProperties.getPropertyInt("maxtime");
 
         outer:
         for (int i = 0; i < maxIters; i++) {
+            // Enforce the -maxtime budget. Unlike EvolutionarySearchEngine, this
+            // engine overrides startSearch() with its own loop, so the base
+            // class's belowMaxTime() check is never reached unless called here.
+            if (!belowMaxTime(dateInitEvolution, maxMinutes)) {
+                log.info("CardumenExportEngine: max time (" + maxMinutes + " min) reached after "
+                        + i + " iteration(s), stopping search");
+                this.outputStatus = AstorOutputStatus.TIME_OUT;
+                break;
+            }
             ModificationPoint target = points.get(i);
             log.info("CardumenExportEngine: iteration " + (i + 1) + "/" + maxIters + " at " + target);
 
@@ -126,6 +136,15 @@ public class CardumenExportEngine extends CardumenApproach {
 
             lastCandidates = candidates;
             for (String candidate : candidates) {
+                // A single iteration can test hundreds of candidates, each a full
+                // test run, so also check the budget between candidates — otherwise
+                // one iteration could overrun -maxtime by many minutes.
+                if (!belowMaxTime(dateInitEvolution, maxMinutes)) {
+                    log.info("CardumenExportEngine: max time (" + maxMinutes
+                            + " min) reached mid-iteration, stopping search");
+                    this.outputStatus = AstorOutputStatus.TIME_OUT;
+                    break outer;
+                }
                 applyAndTestCandidate(target, candidate);
                 if (this.outputStatus == AstorOutputStatus.STOP_BY_PATCH_FOUND) break outer;
             }
