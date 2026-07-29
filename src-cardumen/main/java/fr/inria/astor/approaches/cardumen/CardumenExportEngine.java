@@ -277,8 +277,8 @@ public class CardumenExportEngine extends CardumenApproach {
         // field in Java, so this pattern uniquely identifies array length accesses.
         boolean isArrayLength = "length".equals(ref.getSimpleName())
                 && (declaring == null
-                    || declaring instanceof CtArrayTypeReference
-                    || "int".equals(declaring.getQualifiedName()));
+                || declaring instanceof CtArrayTypeReference
+                || "int".equals(declaring.getQualifiedName()));
         if (isArrayLength) {
             bump(fieldCounts, ARRAY_LENGTH_KEY);
         } else if (declaring != null) {
@@ -396,8 +396,14 @@ public class CardumenExportEngine extends CardumenApproach {
         } finally {
             // Revert the shared Spoon model before serializing: savePatch re-saves the
             // original variant from the current model, so the change must be undone
-            // first or the computed diff would be empty.
-            op.undoChangesInModel(opInstance, solutionVariant);
+            // first or the computed diff would be empty. Undo runs in a finally, so it
+            // must never abort the run: swallow any failure and keep searching.
+            try {
+                op.undoChangesInModel(opInstance, solutionVariant);
+            } catch (Exception e) {
+                log.warn("CardumenExportEngine: could not revert candidate \"" + candidateExpr
+                        + "\" — " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            }
         }
 
         if (passes) {

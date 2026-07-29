@@ -13,7 +13,7 @@ import spoon.reflect.declaration.CtElement;
 import spoon.reflect.path.CtRole;
 
 /**
- * 
+ *
  * @author Matias Martinez
  *
  */
@@ -56,8 +56,16 @@ public class ExpressionReplaceOperator extends ReplaceOp {
 	@Override
 	public boolean undoChangesInModel(OperatorInstance opInstance, ProgramVariant p) {
 
-		// We update the spoon Model
-		opInstance.getModificationPoint().getCodeElement().replace(opInstance.getOriginal());
+		// We update the spoon Model. The candidate may never have been spliced
+		// into the AST (e.g. a code-snippet expression Spoon could not attach at
+		// this location): its parent is then uninitialized and replace() would
+		// throw ParentNotInitializedException. Because undo runs from a finally
+		// in CardumenExportEngine, that abort would kill the whole repair run, so
+		// only revert the tree edit when the candidate is actually attached.
+		CtElement current = opInstance.getModificationPoint().getCodeElement();
+		if (current.isParentInitialized()) {
+			current.replace(opInstance.getOriginal());
+		}
 		// Finally, we update the modification point (i.e., Astor
 		// Representation)
 		opInstance.getModificationPoint().setCodeElement(opInstance.getOriginal());
