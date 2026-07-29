@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Generate a LaTeX pgfplots chart of time-to-patch from d4j-cardumen-results.
 
