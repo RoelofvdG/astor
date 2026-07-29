@@ -17,18 +17,26 @@
 #                                       (run is skipped if present; not written for exit 130/Ctrl+C)
 #
 # Usage:
-#   ./runAllD4JCardumen.sh [--engine bfs|mlfs|export|cardumen] [parallelism] [Project ...]
+#   ./runAllD4JCardumen.sh [--engine bfs|mlfs|export|cardumen] [--whitelist FILE] [parallelism] [Project ...]
 #
-#   --engine, -e  repair engine: 'cardumen' (default), 'bfs', 'mlfs', or 'export'.
-#                 May also be set via the ENGINE env var; the flag wins if both given.
-#   parallelism   number of bugs to run concurrently (default 4)
-#   Project ...   optional list of projects to restrict to (default: all 17)
+#   --engine, -e     repair engine: 'cardumen' (default), 'bfs', 'mlfs', or 'export'.
+#                    May also be set via the ENGINE env var; the flag wins if both given.
+#   --whitelist, -w  only run bugs listed in FILE (one "Project Version" pair per
+#                    line, e.g. "Chart 1"; blank lines and '#' comments ignored).
+#                    Bugs not in the file are skipped. May also be set via the
+#                    WHITELIST env var; the flag wins if both given. If Project
+#                    args are also given, the two are intersected; if no Project
+#                    args are given, the projects are taken from the whitelist file.
+#   parallelism      number of bugs to run concurrently (default 4)
+#   Project ...      optional list of projects to restrict to (default: all 17,
+#                    or the whitelist's projects if --whitelist is given)
 #
 # Examples:
 #   ./runAllD4JCardumen.sh 8                  # all bugs, 8 at a time, plain cardumen
 #   ./runAllD4JCardumen.sh 4 Math Lang        # only Math and Lang bugs, 4 at a time
 #   ./runAllD4JCardumen.sh --engine bfs 8     # all bugs via CardumenExportEngine, BFS
 #   ./runAllD4JCardumen.sh -e mlfs 4 Math     # export engine (MLFS) on Math, 4 at a time
+#   ./runAllD4JCardumen.sh --whitelist single-line-bugs.txt 8   # only whitelisted bugs
 #   MAXTIME=20 RESULTS_ROOT=/data/d4j ./runAllD4JCardumen.sh 16
 #   FORCE=1 ./runAllD4JCardumen.sh 8 Chart    # re-run even bugs already marked .done
 #
@@ -144,15 +152,19 @@ if [ "${1:-}" = "--worker" ]; then
 fi
 
 # --- main: enumerate bugs and dispatch in parallel --------------------------
-# Parse leading --engine/-e options before the parallelism positional.
+# Parse leading --engine/-e and --whitelist/-w options before the parallelism positional.
+WHITELIST=${WHITELIST:-}
 while [ $# -gt 0 ]; do
     case "$1" in
-        -e|--engine) [ $# -ge 2 ] || { echo "Error: $1 requires a value" >&2; exit 2; }
-                     ENGINE=$2; shift 2 ;;
-        --engine=*)  ENGINE=${1#*=}; shift ;;
-        --)          shift; break ;;
-        -*)          echo "Error: unknown option '$1'" >&2; exit 2 ;;
-        *)           break ;;
+        -e|--engine)    [ $# -ge 2 ] || { echo "Error: $1 requires a value" >&2; exit 2; }
+                        ENGINE=$2; shift 2 ;;
+        --engine=*)     ENGINE=${1#*=}; shift ;;
+        -w|--whitelist) [ $# -ge 2 ] || { echo "Error: $1 requires a value" >&2; exit 2; }
+                        WHITELIST=$2; shift 2 ;;
+        --whitelist=*)  WHITELIST=${1#*=}; shift ;;
+        --)             shift; break ;;
+        -*)             echo "Error: unknown option '$1'" >&2; exit 2 ;;
+        *)              break ;;
     esac
 done
 case "$ENGINE" in
@@ -172,8 +184,29 @@ PROJECTS=("$@")   # empty => all projects
 [ -x "$DEFECTS4J" ] || { echo "Error: defects4j not found at $DEFECTS4J" >&2; exit 1; }
 [ -x "$RUN_ONE" ]   || { echo "Error: runD4JBug.sh not found/executable at $RUN_ONE" >&2; exit 1; }
 
+# Whitelist: restrict enumeration to "Project Version" pairs listed in a file.
+declare -A WL_SET
+if [ -n "$WHITELIST" ]; then
+    [ -r "$WHITELIST" ] || { echo "Error: whitelist file not found/readable: $WHITELIST" >&2; exit 2; }
+    WL_PROJECTS=()
+    declare -A WL_SEEN_PROJECT
+    while read -r wp wv; do
+        [ -n "$wp" ] || continue
+        case "$wp" in \#*) continue ;; esac
+        WL_SET["$wp $wv"]=1
+        if [ -z "${WL_SEEN_PROJECT[$wp]:-}" ]; then
+            WL_SEEN_PROJECT[$wp]=1
+            WL_PROJECTS+=("$wp")
+        fi
+    done < "$WHITELIST"
+fi
+
 if [ "${#PROJECTS[@]}" -eq 0 ]; then
-    mapfile -t PROJECTS < <("$DEFECTS4J" pids 2>/dev/null)
+    if [ -n "$WHITELIST" ]; then
+        PROJECTS=("${WL_PROJECTS[@]}")
+    else
+        mapfile -t PROJECTS < <("$DEFECTS4J" pids 2>/dev/null)
+    fi
 fi
 
 mkdir -p "$RESULTS_ROOT"
@@ -200,6 +233,9 @@ for p in "${PROJECTS[@]}"; do
     # bids prints numeric ids on stdout (a harmless Perl warning may go to stderr).
     while read -r b; do
         [ -n "$b" ] || continue
+        if [ -n "$WHITELIST" ] && [ -z "${WL_SET["$p $b"]:-}" ]; then
+            continue
+        fi
         idx=$((idx + 1))
         printf '%s %s %s\n' "$p" "$b" "$idx" >> "$TASKS"
     done < <("$DEFECTS4J" bids -p "$p" 2>/dev/null | grep -E '^[0-9]+$')
@@ -209,7 +245,9 @@ total=$(wc -l < "$TASKS")
 export TOTAL="$total"          # forwarded to workers for the "<index>/<total>" log prefix
 export ENGINE                  # so each xargs worker uses the chosen engine
 export RESULTS_ROOT            # so workers inherit the resolved results directory
-echo ">> ${total} bugs across ${#PROJECTS[@]} project(s): ${PROJECTS[*]}"
+wl_note=""
+[ -n "$WHITELIST" ] && wl_note=" (whitelist: $WHITELIST, ${#WL_SET[@]} entries)"
+echo ">> ${total} bugs across ${#PROJECTS[@]} project(s): ${PROJECTS[*]}${wl_note}"
 echo ">> engine=${ENGINE}; running ${N} in parallel; results under $RESULTS_ROOT"
 
 # One worker invocation per "Project Version" line, N concurrent.
