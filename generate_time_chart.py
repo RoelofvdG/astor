@@ -126,21 +126,27 @@ def _axis_preamble(projects, extra_options):
     return lines
 
 
-def build_bar_chart(grouped):
+def build_bar_chart(grouped, stat="median"):
     projects = [project for project, _ in grouped]
+    agg = statistics.mean if stat == "mean" else statistics.median
+    stat_label = "Mean" if stat == "mean" else "Median"
 
     lines = [r"\begin{figure}[ht]", r"  \centering"]
     lines += _axis_preamble(projects, [
         r"      ybar,",
         r"      bar width=6pt,",
         r"      symbolic x coords={" + ",".join(projects) + r"},",
-        r"      xtick=data,",
+        # List every project explicitly rather than xtick=data: with grouped
+        # ybar, xtick=data only labels the first plot's coordinates, so a
+        # project missing from the first approach (e.g. Cardumen has no Time)
+        # would otherwise leave that group's bars unlabelled.
+        r"      xtick={" + ",".join(projects) + r"},",
         r"      enlarge x limits=0.04,",
     ])
 
     for col in range(3):
         coords = " ".join(
-            f"({project},{statistics.median(values):g})"
+            f"({project},{agg(values):g})"
             for project, columns in grouped
             if (values := columns[col])
         )
@@ -152,9 +158,9 @@ def build_bar_chart(grouped):
     lines.append(r"  \end{axis}")
     lines.append(r"  \end{tikzpicture}")
     lines.append(
-        r"  \caption{Median time to patch discovery per project, by approach"
-        r" (log scale). Bars are omitted where an approach found no patch for"
-        r" that project.}"
+        r"  \caption{" + stat_label + r" time to patch discovery per project, by"
+        r" approach (log scale). Bars are omitted where an approach found no patch"
+        r" for that project.}"
     )
     lines.append(r"  \label{fig:time-to-patch}")
     lines.append(r"\end{figure}")
@@ -234,7 +240,14 @@ def main():
         choices=["box", "bar"],
         default="box",
         help="Chart type: box plot of the full distribution, or bar chart of "
-             "the median (default: box)",
+             "an aggregate (default: box)",
+    )
+    parser.add_argument(
+        "--stat",
+        choices=["median", "mean"],
+        default="median",
+        help="For --plot bar, the aggregate to plot per project/approach "
+             "(default: median)",
     )
     parser.add_argument("--copy", action="store_true", help="Copy the chart to the clipboard")
     parser.add_argument(
@@ -263,7 +276,7 @@ def main():
     if not grouped:
         print("Warning: no bugs with a found patch; chart will be empty.", file=sys.stderr)
 
-    chart = build_box_plot(grouped) if args.plot == "box" else build_bar_chart(grouped)
+    chart = build_box_plot(grouped) if args.plot == "box" else build_bar_chart(grouped, args.stat)
 
     if args.output:
         Path(args.output).write_text(chart + "\n")
